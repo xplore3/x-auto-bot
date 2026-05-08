@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>X Auto Bot 操作记录</title>
+  <link rel="stylesheet" href="logs.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <h1>📜 操作记录</h1>
+        <p>X Auto Bot 运行日志与事件追踪</p>
+      </div>
+      <a href="../options/options.html" class="btn-back">← 返回配置中心</a>
+    </header>
+
+    <div class="stats-bar">
+      <div class="stat-box">
+        <div class="stat-num" id="totalCount">0</div>
+        <div class="stat-label">总记录</div>
+      </div>
+      <div class="stat-box info">
+        <div class="stat-num" id="infoCount">0</div>
+        <div class="stat-label">信息</div>
+      </div>
+      <div class="stat-box success">
+        <div class="stat-num" id="successCount">0</div>
+        <div class="stat-label">成功</div>
+      </div>
+      <div class="stat-box warn">
+        <div class="stat-num" id="warnCount">0</div>
+        <div class="stat-label">警告</div>
+      </div>
+      <div class="stat-box error">
+        <div class="stat-num" id="errorCount">0</div>
+        <div class="stat-label">错误</div>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <div class="filter-group">
+        <label>级别筛选</label>
+        <div class="filter-buttons" id="levelFilters">
+          <button class="filter-btn active" data-level="all">全部</button>
+          <button class="filter-btn" data-level="info">ℹ️ 信息</button>
+          <button class="filter-btn" data-level="success">✅ 成功</button>
+          <button class="filter-btn" data-level="warn">⚠️ 警告</button>
+          <button class="filter-btn" data-level="error">❌ 错误</button>
+        </div>
+      </div>
+      <div class="filter-group">
+        <label>来源筛选</label>
+        <select id="sourceFilter">
+          <option value="all">全部来源</option>
+          <option value="scraper">内容抓取 (Scraper)</option>
+          <option value="automator">自动操作 (Automator)</option>
+          <option value="background">后台服务 (Background)</option>
+        </select>
+      </div>
+      <div class="actions">
+        <button id="clearBtn" class="btn-danger">🗑️ 清空记录</button>
+        <div class="auto-refresh">
+          <input type="checkbox" id="autoRefresh" checked />
+          <label for="autoRefresh">自动刷新</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="log-table-wrapper">
+      <table class="log-table">
+        <thead>
+          <tr>
+            <th style="width: 80px;">时间</th>
+            <th style="width: 60px;">级别</th>
+            <th style="width: 100px;">来源</th>
+            <th>消息</th>
+          </tr>
+        </thead>
+        <tbody id="logTableBody">
+          <tr class="empty-row">
+            <td colspan="4">暂无操作记录</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <script src="logs.js"></script>
+</body>
+</html>

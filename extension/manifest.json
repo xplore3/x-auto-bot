@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "X Auto Bot (AI Agent)",
+  "version": "1.0.0",
+  "description": "自动浏览、发帖并使用 AI 在 X (Twitter) 上回复。",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "alarms"
+  ],
+  "host_permissions": [
+    "*://*.x.com/*",
+    "*://*.twitter.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "X Auto Bot 控制面板"
+  },
+  "options_page": "options/options.html",
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.x.com/*",
+        "*://*.twitter.com/*"
+      ],
+      "js": [
+        "content/x_scraper.js",
+        "content/x_automator.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>X Auto Bot 配置中心</title>
+  <link rel="stylesheet" href="options.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>X Auto Bot 🤖</h1>
+      <p>配置您的自动化助手策略</p>
+    </header>
+    
+    <main>
+      <section class="card">
+        <h2>🔑 基础配置 (API)</h2>
+        <div class="form-group">
+          <label for="apiProvider">AI 服务商 (API Provider)</label>
+          <select id="apiProvider" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: #fff; margin-bottom: 12px; font-size: 14px; appearance: menulist;">
+            <option value="gemini">Google Gemini 官方 (免费但限制多)</option>
+            <option value="openrouter">OpenRouter (推荐, 支持多模型)</option>
+            <option value="qwen">通义千问 Qwen (阿里 DashScope)</option>
+            <option value="deepseek">DeepSeek (深度求索)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="apiKey">API Key</label>
+          <input type="password" id="apiKey" placeholder="输入您的 API Key" />
+          <p class="help-text">用于调用大模型生成回复和推文，<a href="https://aistudio.google.com/app/apikey" target="_blank">获取 Gemini Key</a>、<a href="https://openrouter.ai/keys" target="_blank">获取 OpenRouter Key</a>、<a href="https://dashscope.console.aliyun.com/apiKey" target="_blank">获取千问 Key</a> 或 <a href="https://platform.deepseek.com/api_keys" target="_blank">获取 DeepSeek Key</a></p>
+        </div>
+        <div class="form-group" id="modelGroup" style="display: none;">
+          <label for="aiModel">大模型名称 (Model ID)</label>
+          <input type="text" id="aiModel" placeholder="例如：google/gemini-2.5-flash" />
+          <p class="help-text" id="modelHelpText">请在 OpenRouter 官网查找你想使用的模型 ID，如 <code>anthropic/claude-3-haiku</code>、<code>openai/gpt-4o-mini</code> 或 <code>google/gemini-2.5-flash</code>。</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>🎯 账号与策略配置</h2>
+        <div class="form-group">
+          <label for="targetUsers">目标关注用户 (换行分隔)</label>
+          <textarea id="targetUsers" rows="4" placeholder="elonmusk&#10;OpenAI"></textarea>
+          <p class="help-text">插件将优先浏览这些用户的推文并进行回复。</p>
+        </div>
+        
+        <div class="form-group">
+          <label for="promptTemplate">AI 扮演角色与回复 Prompt</label>
+          <textarea id="promptTemplate" rows="6" placeholder="你是一个..."></textarea>
+          <p class="help-text">使用 <code>{tweet}</code> 代表原推文，使用 <code>{leadTarget}</code> 代表你的引流信息。</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>🧲 引流设置 (Lead Generation)</h2>
+        <div class="form-group">
+          <label for="leadTarget">引流目标 / 植入链接 / 自我介绍</label>
+          <textarea id="leadTarget" rows="3" placeholder="例如：顺便分享一个我刚做的超酷AI工具：https://example.com"></textarea>
+          <p class="help-text">AI 会在生成的回复中，寻找合适的机会软性植入这段引流信息，吸引用户点击或关注。</p>
+        </div>
+      </section>
+      <section class="card">
+        <h2>🧠 AI 账号画像分析 (自动生成，可修改)</h2>
+        <p class="help-text" style="margin-bottom: 12px;">当系统读取到您的 X 主页简介时，会自动通过大模型推断以下信息，用于指导自动发帖与回复风格。您可以自由审阅并手动修改这些内容以校准 AI。</p>
+        <div class="form-group">
+          <label for="aiTargetUsers">🎯 目标用户群体</label>
+          <textarea id="aiTargetUsers" rows="2" placeholder="等待 AI 分析..."></textarea>
+        </div>
+        <div class="form-group">
+          <label for="aiCharacteristics">✍️ 发文特征与人设语气</label>
+          <textarea id="aiCharacteristics" rows="3" placeholder="等待 AI 分析..."></textarea>
+        </div>
+        <div class="form-group">
+          <label for="aiGoals">💰 发文及引流核心目标</label>
+          <textarea id="aiGoals" rows="2" placeholder="等待 AI 分析..."></textarea>
+        </div>
+      </section>
+      
+      <section class="card">
+        <h2>📊 竞品对标与低粉爆款运营拆解报告 (可修改)</h2>
+        <p class="help-text" style="margin-bottom: 12px;">这是 AI 根据您的定位，结合其全网知识库，为您总结的 10 个对标竞品以及“低粉账号起号的 3 个核心套路”。这个报告会被注入到后期的写推文引擎中。您可以随意编辑或补充此策略。</p>
+        <div class="form-group">
+          <textarea id="competitorReport" rows="15" placeholder="正在拼命分析生成中，这可能需要几十秒..."></textarea>
+        </div>
+      </section>
+      
+      <div class="actions">
+        <button id="saveBtn" class="btn-primary">保存配置</button>
+        <a href="../logs/logs.html" class="btn-secondary">📜 查看操作记录</a>
+        <span id="statusMessage" class="status-msg"></span>
+      </div>
+    </main>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>
