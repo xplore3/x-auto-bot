@@ -41,21 +41,60 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "generateReply") {
     addLog('info', '收到回复生成请求，调用 AI 接口...');
     // 调用大模型 API 生成回复
-    generateAIResponse(request.tweetContent)
+    generateAIResponse(request.tweetContent || request.tweetText || '')
       .then(replyText => {
         addLog('success', 'AI 回复生成完成');
-        sendResponse({ success: true, replyText });
+        sendResponse({ success: true, replyText, reply: replyText });
       })
       .catch(error => {
         addLog('error', `AI 接口调用失败: ${error.message}`);
-        sendResponse({ success: false, error: error.message, errorType: error.type || 'UNKNOWN' });
+        sendResponse({
+          success: false,
+          error: error.message,
+          errorType: error.type || 'UNKNOWN',
+          isApiCooldown: error.type === 'RATE_LIMIT'
+        });
       });
     return true; // 保持通道异步开启
   } else if (request.action === "queueUpdated") {
     checkAndSetupAlarm();
-  } else if (request.action === "extractBio") {
-    addLog('info', `后台打开 Profile 页面: ${request.profileUrl}`);
-    chrome.tabs.create({ url: `https://x.com${request.profileUrl}`, active: false }, (tab) => {
+  } else if (request.action === "testPostNow") {
+    const text = (request.text || '').trim();
+    if (!text) {
+      sendResponse({ success: false, error: '测试发帖内容为空' });
+      return false;
+    }
+    chrome.storage.local.get(['pendingPost'], (existing) => {
+      if (existing.pendingPost) {
+        sendResponse({ success: false, error: '已有待发送推文，请先处理完成或停止自动化后再测试' });
+        return;
+      }
+      chrome.storage.local.set({
+        pendingPost: text,
+        pendingPostId: null,
+        pendingPostSource: 'manualTest',
+        isAutoPaused: false,
+        pauseReason: ''
+      }, () => {
+        addLog('info', '收到手动测试发帖请求');
+        triggerPostInTab();
+        sendResponse({ success: true });
+      });
+    });
+    return true;
+  } else if (request.action === "postCompleted") {
+    handlePostCompleted(request.source || 'queue');
+    sendResponse({ success: true });
+  } else if (request.action === "postFailed") {
+    const reason = request.reason || '发帖失败，请人工检查';
+    addLog('error', reason);
+    chrome.storage.local.set({ isAutoPaused: true, pauseReason: reason });
+    sendResponse({ success: true });
+  } else if (request.action === "extractBio" || request.action === "openProfileTab") {
+    const rawUrl = request.url || request.profileUrl || request.profilePath || '';
+    const profileUrl = rawUrl.startsWith('http') ? rawUrl : `https://x.com${rawUrl}`;
+    addLog('info', `后台打开 Profile 页面: ${profileUrl}`);
+    chrome.tabs.create({ url: profileUrl, active: false }, (tab) => {
       // Listen for bio extraction to close the tab
       chrome.storage.onChanged.addListener(function listener(changes, namespace) {
         if (namespace === 'local' && changes.accountBio) {
@@ -327,40 +366,87 @@ function executeNextPost() {
        return;
     }
     
-    const nextTweet = queue.shift();
-    
-    const now = new Date();
-    const todayStr = now.toDateString();
-    let postsToday = result.postsToday || 0;
-    if (result.lastPostDate !== todayStr) postsToday = 0;
-    postsToday++;
     const postsPerDay = result.postsPerDay || 10;
-    
-    addLog('info', `执行发推，今日已发 ${postsToday}/${postsPerDay} 条`);
+    const todayStr = new Date().toDateString();
+    const postsToday = result.lastPostDate === todayStr ? (result.postsToday || 0) : 0;
+    if (postsToday >= postsPerDay) {
+      addLog('info', `今日已达发推上限 ${postsToday}/${postsPerDay}，跳过本次执行`);
+      scheduleForTomorrow(new Date(), result);
+      return;
+    }
+
+    const nextTweet = queue[0];
+    addLog('info', `执行发推，当前队列 ${queue.length} 条，发送成功后剩余 ${Math.max(queue.length - 1, 0)} 条`);
     
     chrome.storage.local.set({ 
-      tweetQueue: queue, 
       pendingPost: nextTweet.text,
-      postsToday: postsToday,
-      lastPostDate: todayStr
+      pendingPostId: nextTweet.id || null,
+      pendingPostSource: 'queue'
     }, () => {
       triggerPostInTab();
-      checkAndSetupAlarm();
       chrome.runtime.sendMessage({ action: "queueCountChanged" }).catch(() => {});
     });
   });
 }
 
+function getIntentPostUrl(text) {
+  return `https://x.com/intent/post?text=${encodeURIComponent(text || '')}`;
+}
+
 function triggerPostInTab() {
-  chrome.tabs.query({ url: "*://*.x.com/*" }, (tabs) => {
-    if (tabs.length > 0) {
-      let tab = tabs.find(t => t.active) || tabs[0];
-      addLog('info', `向标签页 ${tab.id} 发送发推指令`);
-      chrome.tabs.sendMessage(tab.id, { action: "postNewTweet" });
+  chrome.storage.local.get(['pendingPost'], (result) => {
+    const intentUrl = getIntentPostUrl(result.pendingPost || '');
+    chrome.tabs.query({ url: ["*://*.x.com/*", "*://*.twitter.com/*"] }, (tabs) => {
+      if (tabs.length > 0) {
+        let tab = tabs.find(t => t.active) || tabs[0];
+        addLog('info', `向标签页 ${tab.id} 发送发推指令`);
+        chrome.tabs.sendMessage(tab.id, { action: "postNewTweet" }, () => {
+          if (chrome.runtime.lastError) {
+            addLog('warn', `标签页未响应内容脚本，改用 intent/post 导航: ${chrome.runtime.lastError.message}`);
+            chrome.tabs.update(tab.id, { url: intentUrl });
+          }
+        });
+      } else {
+        addLog('info', '未找到 X.com 标签页，新建 intent/post 标签页');
+        chrome.tabs.create({ url: intentUrl });
+      }
+    });
+  });
+}
+
+function handlePostCompleted(source) {
+  chrome.storage.local.get(['postsToday', 'lastPostDate', 'tweetQueue', 'pendingPost', 'pendingPostId'], (result) => {
+    const updates = {
+      pendingPost: null,
+      pendingPostId: null,
+      pendingPostSource: null,
+      isAutoPaused: false,
+      pauseReason: ''
+    };
+
+    if (source === 'queue') {
+      const now = new Date();
+      const todayStr = now.toDateString();
+      let postsToday = result.postsToday || 0;
+      if (result.lastPostDate !== todayStr) postsToday = 0;
+      updates.postsToday = postsToday + 1;
+      updates.lastPostDate = todayStr;
+      const queue = result.tweetQueue || [];
+      if (result.pendingPostId !== null && result.pendingPostId !== undefined) {
+        updates.tweetQueue = queue.filter(item => item.id !== result.pendingPostId);
+      } else if (queue[0] && queue[0].text === result.pendingPost) {
+        updates.tweetQueue = queue.slice(1);
+      }
+      addLog('success', `队列推文发送成功，今日已发 ${updates.postsToday} 条`);
     } else {
-      addLog('info', '未找到 X.com 标签页，新建标签页');
-      chrome.tabs.create({ url: "https://x.com/compose/tweet" });
+      addLog('success', '测试推文发送成功');
     }
+
+    chrome.storage.local.set(updates, () => {
+      chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource']);
+      checkAndSetupAlarm();
+      chrome.runtime.sendMessage({ action: "queueCountChanged" }).catch(() => {});
+    });
   });
 }
 
@@ -554,7 +640,17 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     } else if (changes.isRunning && !changes.isRunning.newValue) {
        addLog('info', '机器人已停止');
        chrome.alarms.clear("postTweetAlarm");
-       chrome.storage.local.remove(['pendingPost']);
+       chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource']);
+    }
+    if (changes.isAutoPaused && changes.isAutoPaused.oldValue && !changes.isAutoPaused.newValue) {
+       chrome.storage.local.get(['pendingPost', 'pendingPostSource', 'isRunning'], (res) => {
+          if (res.pendingPost && (res.isRunning || res.pendingPostSource === 'manualTest')) {
+             addLog('info', '检测到自动操作恢复，继续处理待发送推文');
+             triggerPostInTab();
+          } else {
+             checkAndSetupAlarm();
+          }
+       });
     }
     if (changes.tweetQueue) {
        chrome.storage.local.get(['aiPersona'], (res) => {

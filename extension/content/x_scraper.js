@@ -257,6 +257,7 @@ function scrapeTweets() {
       chrome.runtime.sendMessage({
         action: 'generateReply',
         tweetText: text,
+        tweetContent: text,
         tweetAuthor: author,
         tweetElementId: tweetId
       }, (response) => {
@@ -273,8 +274,8 @@ function scrapeTweets() {
           }
           return;
         }
-        if (response && response.reply) {
-          const replyText = response.reply;
+        const replyText = response ? (response.replyText || response.reply) : '';
+        if (replyText) {
           addLog('success', `已生成回复 @${author}: ${replyText.substring(0, 40)}...`);
           
           // Dispatch event for automator

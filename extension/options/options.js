@@ -2,6 +2,16 @@ document.addEventListener('DOMContentLoaded', restoreOptions);
 document.getElementById('saveBtn').addEventListener('click', saveOptions);
 document.getElementById('apiProvider').addEventListener('change', toggleModelInput);
 document.getElementById('postScheduleMode').addEventListener('change', toggleScheduleMode);
+document.getElementById('testPostBtn').addEventListener('click', testPostNow);
+
+const DEFAULT_TEST_POST = `AI副业别先找工具。
+
+先找需求：
+谁在海外平台付费？
+他们反复买什么？
+你能不能用AI把交付成本压低？
+
+工具不值钱，能交付结果才值钱。`;
 
 const PROVIDER_DEFAULTS = {
   gemini: { model: 'gemini-2.5-flash', showModel: false },
@@ -45,6 +55,17 @@ function toggleScheduleMode() {
   document.getElementById('intervalGroup').style.display = mode === 'interval' ? 'block' : 'none';
 }
 
+function showStatus(message, color = '#17bf63', timeout = 3000) {
+  const status = document.getElementById('statusMessage');
+  status.textContent = message;
+  status.style.color = color;
+  status.classList.add('show');
+  setTimeout(() => {
+    status.classList.remove('show');
+    status.style.color = '';
+  }, timeout);
+}
+
 function saveOptions() {
   const apiKey = document.getElementById('apiKey').value.trim();
   const apiProvider = document.getElementById('apiProvider').value;
@@ -61,6 +82,7 @@ function saveOptions() {
   const aiCharacteristics = document.getElementById('aiCharacteristics').value;
   const aiGoals = document.getElementById('aiGoals').value;
   const competitorReport = document.getElementById('competitorReport').value;
+  const testPostText = document.getElementById('testPostText').value.trim();
 
   // 基础配置校验
   const missing = [];
@@ -68,21 +90,9 @@ function saveOptions() {
   if (!leadTarget) missing.push('引流目标');
   
   if (missing.length > 0) {
-    const status = document.getElementById('statusMessage');
-    status.textContent = `⚠️ 保存成功，但缺少关键配置：${missing.join('、')}，机器人可能无法正常运行。`;
-    status.classList.add('show');
-    status.style.color = '#f5a623';
-    setTimeout(() => {
-      status.classList.remove('show');
-      status.style.color = '';
-    }, 5000);
+    showStatus(`⚠️ 保存成功，但缺少关键配置：${missing.join('、')}，机器人可能无法正常运行。`, '#f5a623', 5000);
   } else {
-    const status = document.getElementById('statusMessage');
-    status.textContent = '✅ 配置已成功保存！';
-    status.classList.add('show');
-    setTimeout(() => {
-      status.classList.remove('show');
-    }, 3000);
+    showStatus('✅ 配置已成功保存！');
   }
 
   chrome.storage.local.get(['aiPersona'], (result) => {
@@ -98,8 +108,37 @@ function saveOptions() {
       targetUsers,
       promptTemplate,
       leadTarget,
+      postsPerDay,
+      postScheduleMode,
+      smartTimeSlots,
+      postInterval,
       aiPersona: persona,
-      competitorReport
+      competitorReport,
+      testPostText
+    }, () => {
+      chrome.runtime.sendMessage({ action: 'queueUpdated' }, () => {});
+    });
+  });
+}
+
+function testPostNow() {
+  const text = document.getElementById('testPostText').value.trim();
+  if (!text) {
+    showStatus('⚠️ 测试推文内容不能为空。', '#f5a623', 3000);
+    return;
+  }
+
+  chrome.storage.local.set({ testPostText: text }, () => {
+    chrome.runtime.sendMessage({ action: 'testPostNow', text }, (response) => {
+      if (chrome.runtime.lastError) {
+        showStatus(`❌ 测试发帖启动失败：${chrome.runtime.lastError.message}`, '#ff4d4f', 6000);
+        return;
+      }
+      if (!response || !response.success) {
+        showStatus(`❌ 测试发帖启动失败：${response?.error || '未知错误'}`, '#ff4d4f', 6000);
+        return;
+      }
+      showStatus('✅ 已启动测试发帖，请查看 X 标签页和操作记录。', '#17bf63', 5000);
     });
   });
 }
@@ -117,7 +156,8 @@ function restoreOptions() {
     smartTimeSlots: '8-10,12-14,19-23',
     postInterval: 30,
     aiPersona: { targetUsers: '', characteristics: '', goals: '' },
-    competitorReport: ''
+    competitorReport: '',
+    testPostText: DEFAULT_TEST_POST
   }, (items) => {
     document.getElementById('apiKey').value = items.apiKey;
     document.getElementById('apiProvider').value = items.apiProvider;
@@ -140,5 +180,6 @@ function restoreOptions() {
     document.getElementById('aiCharacteristics').value = items.aiPersona.characteristics || '';
     document.getElementById('aiGoals').value = items.aiPersona.goals || '';
     document.getElementById('competitorReport').value = items.competitorReport || '';
+    document.getElementById('testPostText').value = items.testPostText || DEFAULT_TEST_POST;
   });
 }

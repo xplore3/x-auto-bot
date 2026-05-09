@@ -10,11 +10,21 @@ let consecutiveFailures = 0;
 
 function checkAndPause() {
   if (consecutiveFailures >= 2) {
-    addLog('error', `连续 ${consecutiveFailures} 次操作失败，已暂停自动操作，等待人工干预`);
-    chrome.storage.local.set({
-      isAutoPaused: true,
-      pauseReason: '连续发推/回复失败，请检查当前页面状态后手动点击继续'
-    });
+    pauseAutomation(`连续 ${consecutiveFailures} 次操作失败，请检查当前页面状态后手动点击继续`);
+  }
+}
+
+function pauseAutomation(reason) {
+  addLog('error', reason);
+  chrome.storage.local.set({
+    isAutoPaused: true,
+    pauseReason: reason
+  });
+  try {
+    const result = chrome.runtime.sendMessage({ action: 'postFailed', reason });
+    if (result?.catch) result.catch(() => {});
+  } catch (e) {
+    // Extension context may be gone during reload; local pause state is already written.
   }
 }
 
@@ -32,6 +42,64 @@ function addLog(level, message) {
     if (logs.length > MAX_LOGS) logs = logs.slice(-MAX_LOGS);
     chrome.storage.local.set({ logs });
   });
+}
+
+function getIntentPostUrl(text) {
+  return `https://x.com/intent/post?text=${encodeURIComponent(text || '')}`;
+}
+
+function normalizeText(text) {
+  return (text || '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map(line => line.trim().replace(/\s+/g, ' '))
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+}
+
+function getEditorText(element) {
+  return normalizeText(element?.innerText || element?.textContent || element?.value || '');
+}
+
+function findTweetEditor() {
+  return document.querySelector('div[data-testid="tweetTextarea_0"]');
+}
+
+function findSendButton(scope) {
+  const root = scope || document;
+  return root.querySelector('[data-testid="tweetButton"]') || root.querySelector('[data-testid="tweetButtonInline"]');
+}
+
+async function waitForElement(getter, timeout = 8000, interval = 250) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeout) {
+    const element = typeof getter === 'function' ? getter() : document.querySelector(getter);
+    if (element) return element;
+    await sleep(interval);
+  }
+  return null;
+}
+
+async function waitForEnabledButton(getter, timeout = 10000, interval = 500) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeout) {
+    const button = getter();
+    if (button && !button.disabled && button.getAttribute('aria-disabled') !== 'true') {
+      return button;
+    }
+    await sleep(interval);
+  }
+  return null;
+}
+
+function isLoggedOutOrBlocked() {
+  const bodyText = document.body?.innerText || '';
+  return (
+    document.querySelector('a[href="/login"], a[href="/i/flow/login"]') ||
+    /Sign in to X|Log in to X|登录 X|登录到 X|Something went wrong|出错了|验证码|Verify your identity|Confirm your identity|验证你的身份|需要验证|captcha/i.test(bodyText)
+  );
 }
 
 window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
@@ -109,40 +177,20 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
       if (sendBtn) {
         addLog('info', `找到发送按钮，当前 disabled=${sendBtn.disabled}, aria-disabled=${sendBtn.getAttribute('aria-disabled')}`);
         
-        // 等待 React 状态更新
-        let retryCount = 0;
-        while ((sendBtn.disabled || sendBtn.getAttribute('aria-disabled') === 'true') && retryCount < 8) {
-          addLog('info', `发送按钮仍被禁用，第 ${retryCount + 1} 次等待...`);
-          await sleep(600);
-          // Re-find button in case DOM changed
+        sendBtn = await waitForEnabledButton(() => {
           const d = document.querySelector('div[role="dialog"]');
-          sendBtn = d 
-            ? (d.querySelector('[data-testid="tweetButton"]') || d.querySelector('[data-testid="tweetButtonInline"]'))
-            : sendBtn;
-          if (!sendBtn) break;
-          retryCount++;
-        }
+          return d ? findSendButton(d) : findSendButton(document);
+        }, 6000);
         
         if (!sendBtn) {
-          addLog('error', '重试过程中按钮从 DOM 中消失');
+          consecutiveFailures++;
+          addLog('error', `发送按钮未自然启用，取消本次回复 (连续失败 ${consecutiveFailures} 次)`);
+          checkAndPause();
+          return;
         } else {
-          // 强制启用按钮
-          sendBtn.removeAttribute('disabled');
-          sendBtn.setAttribute('aria-disabled', 'false');
-          
-          // 触发完整的事件序列，确保 React 能捕获
           simulateRealClick(sendBtn);
           addLog('info', '已触发发送按钮点击事件');
-          
-          await sleep(1000);
-          
-          // 如果弹窗还在，再点一次
-          const stillModal = document.querySelector('div[role="dialog"]') || document.querySelector('div[data-testid="tweetTextarea_0"]');
-          if (stillModal) {
-            addLog('warn', '弹窗仍在，执行第2次点击');
-            simulateRealClick(sendBtn);
-            await sleep(1000);
-          }
+          await sleep(1500);
         }
         
         // 最终判断
@@ -246,110 +294,112 @@ async function handlePendingPost() {
     return;
   }
   if (!chrome.runtime?.id) return;
-  chrome.storage.local.get(['pendingPost', 'isRunning'], async (result) => {
-    if (!result.isRunning) {
+  chrome.storage.local.get(['pendingPost', 'pendingPostSource', 'isRunning'], async (result) => {
+    const isManualTest = result.pendingPostSource === 'manualTest';
+    if (!result.isRunning && !isManualTest) {
       addLog('info', '机器人已停止，跳过发推');
       return;
     }
     if (!result.pendingPost) {
-      addLog('warn', '没有待发送的推文内容');
       return;
     }
     
     isAutomatorBusy = true;
-    const postText = result.pendingPost;
+    const postText = String(result.pendingPost || '').trim();
+    const expectedText = normalizeText(postText);
     
-    addLog('info', '开始执行定时发文...');
+    addLog('info', isManualTest ? '开始执行测试发文...' : '开始执行定时发文...');
     chrome.storage.local.set({ isTyping: true });
     try {
-      // Find global new tweet button
-      let newTweetBtn = document.querySelector('[data-testid="SideNav_NewTweet_Button"]');
-      
-      // If we are on /compose/tweet page, the input might already be open
-      let draftEditor = document.querySelector('div[data-testid="tweetTextarea_0"]');
-      
-      if (!draftEditor && newTweetBtn) {
-        newTweetBtn.click();
-        addLog('info', '已点击发推按钮');
-        await sleep(1500);
-        draftEditor = document.querySelector('div[data-testid="tweetTextarea_0"]');
-      }
-      
-      if (!draftEditor) {
-        addLog('warn', '未找到推文编辑器');
+      if (!postText) {
+        pauseAutomation('待发推文为空，已暂停');
         return;
       }
-      
-      await simulateTyping(draftEditor, postText);
-      addLog('info', `已输入推文内容 (${postText.length} 字)`);
-      
-      // Find send button inside the dialog
+
+      if (isLoggedOutOrBlocked()) {
+        pauseAutomation('X 页面可能未登录、报错或出现验证，已暂停发推');
+        return;
+      }
+
+      if (!window.location.pathname.includes('/intent/post')) {
+        addLog('info', '使用 X intent/post 预填推文，避免中文输入法污染');
+        window.location.assign(getIntentPostUrl(postText));
+        return;
+      }
+
+      const draftEditor = await waitForElement(findTweetEditor, 10000);
+      if (!draftEditor) {
+        pauseAutomation('未找到 intent/post 推文编辑器，已暂停');
+        return;
+      }
+
+      let actualText = getEditorText(draftEditor);
+      if (actualText !== expectedText) {
+        addLog('warn', `预填文本暂未匹配，等待 X 渲染。当前: ${actualText.substring(0, 40)}...`);
+        await sleep(1200);
+        actualText = getEditorText(draftEditor);
+      }
+
+      if (actualText !== expectedText) {
+        pauseAutomation(`预填文本校验失败，已暂停。期望「${expectedText.substring(0, 40)}...」，实际「${actualText.substring(0, 40)}...」`);
+        return;
+      }
+
+      addLog('success', `推文文本校验通过 (${postText.length} 字)`);
+
       const postDialog = draftEditor.closest('div[role="dialog"]') || document.querySelector('div[role="dialog"]');
-      let sendBtn = null;
-      
-      if (postDialog) {
-        sendBtn = postDialog.querySelector('[data-testid="tweetButton"]') || postDialog.querySelector('[data-testid="tweetButtonInline"]');
-      }
+      let sendBtn = postDialog ? findSendButton(postDialog) : findSendButton(document);
       if (!sendBtn) {
-        sendBtn = document.querySelector('[data-testid="tweetButton"]') || document.querySelector('[data-testid="tweetButtonInline"]');
+        sendBtn = await waitForElement(() => {
+          const dialog = document.querySelector('div[role="dialog"]');
+          return dialog ? findSendButton(dialog) : findSendButton(document);
+        }, 5000);
       }
-      
+
       if (!sendBtn) {
-        addLog('warn', '第1次尝试：未找到发推按钮，等待重试...');
-        await sleep(1500);
-        const retryDialog = document.querySelector('div[role="dialog"]');
-        sendBtn = retryDialog 
-          ? (retryDialog.querySelector('[data-testid="tweetButton"]') || retryDialog.querySelector('[data-testid="tweetButtonInline"]'))
-          : (document.querySelector('[data-testid="tweetButton"]') || document.querySelector('[data-testid="tweetButtonInline"]'));
-      }
-      
-      if (sendBtn) {
-        addLog('info', `找到发推按钮，当前 disabled=${sendBtn.disabled}`);
-        
-        let retryCount = 0;
-        while ((sendBtn.disabled || sendBtn.getAttribute('aria-disabled') === 'true') && retryCount < 8) {
-          addLog('info', `发推按钮仍被禁用，第 ${retryCount + 1} 次等待...`);
-          await sleep(600);
-          const d = document.querySelector('div[role="dialog"]');
-          sendBtn = d 
-            ? (d.querySelector('[data-testid="tweetButton"]') || d.querySelector('[data-testid="tweetButtonInline"]'))
-            : sendBtn;
-          if (!sendBtn) break;
-          retryCount++;
-        }
-        
-        if (!sendBtn) {
-          addLog('error', '重试过程中按钮从 DOM 中消失');
-        } else {
-          sendBtn.removeAttribute('disabled');
-          sendBtn.setAttribute('aria-disabled', 'false');
-          simulateRealClick(sendBtn);
-          addLog('info', '已触发发推按钮点击事件');
-          await sleep(1000);
-          
-          const stillModal = document.querySelector('div[role="dialog"]') || document.querySelector('div[data-testid="tweetTextarea_0"]');
-          if (stillModal) {
-            addLog('warn', '弹窗仍在，执行第2次点击');
-            simulateRealClick(sendBtn);
-            await sleep(1000);
-          }
-          
-          const modalGone = !(document.querySelector('div[role="dialog"]') || document.querySelector('div[data-testid="tweetTextarea_0"]'));
-          if (modalGone) {
-            consecutiveFailures = 0;
-            addLog('success', '定时推文发送成功！');
-            chrome.storage.local.remove(['pendingPost']);
-          } else {
-            consecutiveFailures++;
-            addLog('warn', `弹窗仍在，发推可能未完成 (连续失败 ${consecutiveFailures} 次)`);
-            checkAndPause();
-          }
-        }
-      } else {
         consecutiveFailures++;
         addLog('error', `未找到发推按钮 (连续失败 ${consecutiveFailures} 次)`);
         checkAndPause();
+        return;
       }
+
+      sendBtn = await waitForEnabledButton(() => {
+        const dialog = document.querySelector('div[role="dialog"]');
+        return dialog ? findSendButton(dialog) : findSendButton(document);
+      }, 10000);
+
+      if (!sendBtn) {
+        consecutiveFailures++;
+        addLog('error', `发推按钮未自然启用，取消发推 (连续失败 ${consecutiveFailures} 次)`);
+        checkAndPause();
+        return;
+      }
+
+      simulateRealClick(sendBtn);
+      addLog('info', '已点击发推按钮');
+      await waitForElement(() => {
+        const editorStillOpen = document.querySelector('div[role="dialog"]') || findTweetEditor();
+        return editorStillOpen ? null : document.body;
+      }, 10000, 500);
+
+      const editorStillOpen = document.querySelector('div[role="dialog"]') || findTweetEditor();
+      if (editorStillOpen) {
+        consecutiveFailures++;
+        addLog('warn', `发帖框仍在，发推可能未完成 (连续失败 ${consecutiveFailures} 次)`);
+        checkAndPause();
+        return;
+      }
+
+      consecutiveFailures = 0;
+      addLog('success', isManualTest ? '测试推文发送成功！' : '定时推文发送成功！');
+      chrome.runtime.sendMessage({
+        action: 'postCompleted',
+        source: result.pendingPostSource || 'queue'
+      }, () => {
+        if (chrome.runtime.lastError) {
+          chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource']);
+        }
+      });
       
     } catch (e) {
       consecutiveFailures++;
