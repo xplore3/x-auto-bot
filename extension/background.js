@@ -182,51 +182,105 @@ function checkAndSetupAlarm() {
   });
 }
 
+// ==========================================
+// Post Scheduling
+// ==========================================
+function parseTimeSlots(slotsStr) {
+  if (!slotsStr) return [{ start: 8, end: 10 }, { start: 12, end: 14 }, { start: 19, end: 23 }];
+  return slotsStr.split(',').map(s => {
+    const parts = s.trim().split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parseInt(parts[1], 10);
+    return { start: isNaN(start) ? 0 : start, end: isNaN(end) ? 24 : end };
+  }).filter(s => s.start < s.end);
+}
+
 function scheduleNextPost() {
   const now = new Date();
-  chrome.storage.local.get(['postsToday', 'lastPostDate'], (res) => {
-     let postsToday = res.postsToday || 0;
-     let lastPostDate = res.lastPostDate || '';
-     const todayStr = now.toDateString();
-     
-     if (lastPostDate !== todayStr) postsToday = 0;
-     
-     if (postsToday >= 10) {
-         scheduleForTomorrow();
-         return;
-     }
-     
-     const hour = now.getHours();
-     let targetHour = 0;
-     let targetMin = Math.floor(Math.random() * 60);
-     let addDays = 0;
-     
-     if (hour < 8) {
-         targetHour = 8 + Math.floor(Math.random() * 2);
-     } else if (hour >= 8 && hour < 10) {
-         targetHour = 12 + Math.floor(Math.random() * 2);
-     } else if (hour >= 10 && hour < 12) {
-         targetHour = 12 + Math.floor(Math.random() * 2);
-     } else if (hour >= 12 && hour < 14) {
-         targetHour = 19 + Math.floor(Math.random() * 4);
-     } else if (hour >= 14 && hour < 19) {
-         targetHour = 19 + Math.floor(Math.random() * 4);
-     } else if (hour >= 19 && hour < 23) {
-         scheduleForTomorrow();
-         return;
-     } else {
-         scheduleForTomorrow();
-         return;
-     }
-     
-     function scheduleForTomorrow() {
-         targetHour = 8 + Math.floor(Math.random() * 2);
-         addDays = 1;
-         setAlarm(targetHour, targetMin, addDays);
-     }
-     
-     setAlarm(targetHour, targetMin, addDays);
+  chrome.storage.local.get([
+    'postsToday', 'lastPostDate',
+    'postsPerDay', 'postScheduleMode', 'smartTimeSlots', 'postInterval'
+  ], (res) => {
+    const postsToday = (res.lastPostDate === now.toDateString()) ? (res.postsToday || 0) : 0;
+    const postsPerDay = res.postsPerDay || 10;
+    const mode = res.postScheduleMode || 'smart';
+    
+    if (postsToday >= postsPerDay) {
+      addLog('info', `今日已发 ${postsToday}/${postsPerDay} 条，暂停发推至次日`);
+      scheduleForTomorrow(now, res);
+      return;
+    }
+    
+    if (mode === 'interval') {
+      scheduleInterval(now, res);
+    } else {
+      scheduleSmart(now, res, postsToday, postsPerDay);
+    }
   });
+}
+
+function scheduleInterval(now, config) {
+  const interval = (config.postInterval || 60) * 60000;
+  const targetTime = new Date(now.getTime() + interval);
+  const targetHour = targetTime.getHours();
+  const targetMin = targetTime.getMinutes();
+  const addDays = targetTime.getDate() !== now.getDate() ? 1 : 0;
+  setAlarm(targetHour, targetMin, addDays);
+  addLog('info', `固定间隔模式：计划 ${targetTime.toLocaleString()} 发推`);
+}
+
+function scheduleSmart(now, config, postsToday, postsPerDay) {
+  const slots = parseTimeSlots(config.smartTimeSlots);
+  if (slots.length === 0) {
+    addLog('warn', '智能时段配置为空，使用默认时段');
+    slots.push({ start: 8, end: 10 }, { start: 12, end: 14 }, { start: 19, end: 23 });
+  }
+  
+  const hour = now.getHours();
+  let targetSlot = null;
+  let addDays = 0;
+  
+  for (let i = 0; i < slots.length; i++) {
+    const slot = slots[i];
+    if (hour < slot.start) {
+      // 当前时间在该时段开始之前
+      targetSlot = slot;
+      break;
+    } else if (hour >= slot.start && hour < slot.end) {
+      // 当前时间在该时段内，跳到下一个时段
+      if (i + 1 < slots.length) {
+        targetSlot = slots[i + 1];
+      } else {
+        targetSlot = slots[0];
+        addDays = 1;
+      }
+      break;
+    }
+  }
+  
+  // 当前时间在所有时段之后
+  if (!targetSlot) {
+    targetSlot = slots[0];
+    addDays = 1;
+  }
+  
+  const range = Math.max(1, targetSlot.end - targetSlot.start);
+  const targetHour = targetSlot.start + Math.floor(Math.random() * range);
+  const targetMin = Math.floor(Math.random() * 60);
+  
+  setAlarm(targetHour, targetMin, addDays);
+  const targetTime = new Date(now.getFullYear(), now.getMonth(), now.getDate() + addDays, targetHour, targetMin);
+  addLog('info', `智能分布模式：计划 ${targetTime.toLocaleString()} 发推（今日 ${postsToday}/${postsPerDay}）`);
+}
+
+function scheduleForTomorrow(now, config) {
+  // 达到每日上限后，统一安排到次日第一个时段的随机时间点
+  const slots = parseTimeSlots(config.smartTimeSlots);
+  const firstSlot = slots[0] || { start: 8, end: 10 };
+  const range = Math.max(1, firstSlot.end - firstSlot.start);
+  const targetHour = firstSlot.start + Math.floor(Math.random() * range);
+  const targetMin = Math.floor(Math.random() * 60);
+  setAlarm(targetHour, targetMin, 1);
 }
 
 function setAlarm(targetHour, targetMin, addDays) {
@@ -253,7 +307,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 function executeNextPost() {
-  chrome.storage.local.get(['tweetQueue', 'pendingPost', 'postsToday', 'lastPostDate'], (result) => {
+  chrome.storage.local.get(['tweetQueue', 'pendingPost', 'postsToday', 'lastPostDate', 'postsPerDay'], (result) => {
     let queue = result.tweetQueue || [];
     if (queue.length === 0) {
       checkAndSetupAlarm();
@@ -272,8 +326,9 @@ function executeNextPost() {
     let postsToday = result.postsToday || 0;
     if (result.lastPostDate !== todayStr) postsToday = 0;
     postsToday++;
+    const postsPerDay = result.postsPerDay || 10;
     
-    addLog('info', `执行发推，今日已发 ${postsToday}/10 条`);
+    addLog('info', `执行发推，今日已发 ${postsToday}/${postsPerDay} 条`);
     
     chrome.storage.local.set({ 
       tweetQueue: queue, 
@@ -292,6 +347,7 @@ function triggerPostInTab() {
   chrome.tabs.query({ url: "*://*.x.com/*" }, (tabs) => {
     if (tabs.length > 0) {
       let tab = tabs.find(t => t.active) || tabs[0];
+      addLog('info', `向标签页 ${tab.id} 发送发推指令`);
       chrome.tabs.sendMessage(tab.id, { action: "postNewTweet" });
     } else {
       addLog('info', '未找到 X.com 标签页，新建标签页');

@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', restoreOptions);
 document.getElementById('saveBtn').addEventListener('click', saveOptions);
 document.getElementById('apiProvider').addEventListener('change', toggleModelInput);
+document.getElementById('postScheduleMode').addEventListener('change', toggleScheduleMode);
 
 const PROVIDER_DEFAULTS = {
   gemini: { model: 'gemini-2.5-flash', showModel: false },
@@ -38,6 +39,12 @@ function toggleModelInput() {
   }
 }
 
+function toggleScheduleMode() {
+  const mode = document.getElementById('postScheduleMode').value;
+  document.getElementById('smartSlotsGroup').style.display = mode === 'smart' ? 'block' : 'none';
+  document.getElementById('intervalGroup').style.display = mode === 'interval' ? 'block' : 'none';
+}
+
 function saveOptions() {
   const apiKey = document.getElementById('apiKey').value.trim();
   const apiProvider = document.getElementById('apiProvider').value;
@@ -45,6 +52,10 @@ function saveOptions() {
   const targetUsers = document.getElementById('targetUsers').value;
   const promptTemplate = document.getElementById('promptTemplate').value;
   const leadTarget = document.getElementById('leadTarget').value.trim();
+  const postsPerDay = parseInt(document.getElementById('postsPerDay').value, 10) || 10;
+  const postScheduleMode = document.getElementById('postScheduleMode').value;
+  const smartTimeSlots = document.getElementById('smartTimeSlots').value.trim();
+  const postInterval = parseInt(document.getElementById('postInterval').value, 10) || 60;
   
   const aiTargetUsers = document.getElementById('aiTargetUsers').value;
   const aiCharacteristics = document.getElementById('aiCharacteristics').value;
@@ -101,6 +112,10 @@ function restoreOptions() {
     targetUsers: '',
     promptTemplate: '你是一个社交媒体引流专家。请根据推文内容，给出一段简短、神回复级别的评论（不超过 40 个字）。\n如果合适的话，请巧妙、自然地顺带提及我的【引流信息】，千万不要显得像生硬的广告，要像朋友间的随口分享：\n\n【推文】：{tweet}\n【引流信息】：{leadTarget}\n\n回复：',
     leadTarget: '',
+    postsPerDay: 10,
+    postScheduleMode: 'smart',
+    smartTimeSlots: '8-10,12-14,19-23',
+    postInterval: 60,
     aiPersona: { targetUsers: '', characteristics: '', goals: '' },
     competitorReport: ''
   }, (items) => {
@@ -116,6 +131,11 @@ function restoreOptions() {
     
     toggleModelInput();
     document.getElementById('leadTarget').value = items.leadTarget;
+    document.getElementById('postsPerDay').value = items.postsPerDay;
+    document.getElementById('postScheduleMode').value = items.postScheduleMode;
+    document.getElementById('smartTimeSlots').value = items.smartTimeSlots;
+    document.getElementById('postInterval').value = items.postInterval;
+    toggleScheduleMode();
     document.getElementById('aiTargetUsers').value = items.aiPersona.targetUsers || '';
     document.getElementById('aiCharacteristics').value = items.aiPersona.characteristics || '';
     document.getElementById('aiGoals').value = items.aiPersona.goals || '';

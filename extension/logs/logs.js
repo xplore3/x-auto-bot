@@ -35,10 +35,19 @@ function formatTime(ts) {
 
 function loadLogs() {
   chrome.storage.local.get(['logs'], (result) => {
-    allLogs = result.logs || [];
+    const newLogs = result.logs || [];
+    if (isSameLogs(allLogs, newLogs)) return;
+    allLogs = newLogs;
     updateStats();
     renderTable();
   });
+}
+
+function isSameLogs(oldArr, newArr) {
+  if (oldArr.length !== newArr.length) return false;
+  if (oldArr.length === 0) return true;
+  return oldArr[0].time === newArr[0].time &&
+         oldArr[oldArr.length - 1].time === newArr[newArr.length - 1].time;
 }
 
 function updateStats() {
@@ -59,7 +68,32 @@ function getFilteredLogs() {
     const levelMatch = currentLevel === 'all' || log.level === currentLevel;
     const sourceMatch = currentSource === 'all' || log.source === currentSource;
     return levelMatch && sourceMatch;
-  }).slice().reverse();
+  });
+}
+
+function createLogRow(log) {
+  const tr = document.createElement('tr');
+  tr.dataset.time = String(log.time);
+  const time = formatTime(log.time);
+  const levelClass = log.level || 'info';
+  const levelText = LEVEL_LABELS[log.level] || log.level;
+  const sourceText = SOURCE_LABELS[log.source] || log.source || '未知';
+  const msg = escapeHtml(log.message || '');
+
+  tr.innerHTML = `
+    <td><span class="log-time">${time}</span></td>
+    <td><span class="log-level ${levelClass}">${levelText}</span></td>
+    <td><span class="log-source">${sourceText}</span></td>
+    <td><span class="log-message">${msg}</span></td>
+  `;
+  return tr;
+}
+
+function createEmptyRow(message) {
+  const tr = document.createElement('tr');
+  tr.className = 'empty-row';
+  tr.innerHTML = `<td colspan="4">${message}</td>`;
+  return tr;
 }
 
 function renderTable() {
@@ -67,29 +101,41 @@ function renderTable() {
   const filtered = getFilteredLogs();
 
   if (filtered.length === 0) {
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="4">${allLogs.length === 0 ? '暂无操作记录' : '没有符合筛选条件的记录'}</td></tr>`;
+    tbody.replaceChildren(createEmptyRow(allLogs.length === 0 ? '暂无操作记录' : '没有符合筛选条件的记录'));
     return;
   }
 
-  tbody.innerHTML = filtered.map(log => {
-    const time = formatTime(log.time);
-    const levelClass = log.level || 'info';
-    const levelText = LEVEL_LABELS[log.level] || log.level;
-    const sourceText = SOURCE_LABELS[log.source] || log.source || '未知';
-    const msg = escapeHtml(log.message || '');
-    return `
-      <tr>
-        <td><span class="log-time">${time}</span></td>
-        <td><span class="log-level ${levelClass}">${levelText}</span></td>
-        <td><span class="log-source">${sourceText}</span></td>
-        <td><span class="log-message">${msg}</span></td>
-      </tr>
-    `;
-  }).join('');
+  // 获取当前 DOM 中已存在的日志时间戳
+  const existingTimes = new Set(
+    Array.from(tbody.querySelectorAll('tr[data-time]')).map(tr => tr.dataset.time)
+  );
+
+  // 只把不在 DOM 中的新日志追加到 tbody 末尾（底部）
+  const frag = document.createDocumentFragment();
+  let appended = false;
+  filtered.forEach(log => {
+    if (!existingTimes.has(String(log.time))) {
+      frag.appendChild(createLogRow(log));
+      appended = true;
+    }
+  });
+
+  if (appended) {
+    tbody.appendChild(frag);
+    const emptyRow = tbody.querySelector('.empty-row');
+    if (emptyRow) emptyRow.remove();
+  }
+
+  // 清理已不在 filtered 中的旧行（截断或筛选变化时）
+  const filteredTimes = new Set(filtered.map(l => String(l.time)));
+  tbody.querySelectorAll('tr[data-time]').forEach(tr => {
+    if (!filteredTimes.has(tr.dataset.time)) {
+      tr.remove();
+    }
+  });
 }
 
 function setupFilters() {
-  // Level filter buttons
   const levelButtons = document.querySelectorAll('#levelFilters .filter-btn');
   levelButtons.forEach(btn => {
     btn.addEventListener('click', () => {
@@ -100,7 +146,6 @@ function setupFilters() {
     });
   });
 
-  // Source filter dropdown
   document.getElementById('sourceFilter').addEventListener('change', (e) => {
     currentSource = e.target.value;
     renderTable();

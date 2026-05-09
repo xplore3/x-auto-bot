@@ -1,4 +1,7 @@
 // content/x_scraper.js
+(function() {
+'use strict';
+
 console.log("X Auto Bot: Scraper loaded on X.com");
 
 // Global cooldown to prevent hitting Gemini API rate limits (15 requests/min)
@@ -36,120 +39,19 @@ function setProfileProgress(stage, message, percent) {
 }
 
 // ==========================================
-// Tweet Scraping
-// ==========================================
-function scrapeTweets() {
-  if (!chrome.runtime?.id) return;
-  chrome.storage.local.get(['isRunning', 'twitterCooldownUntil', 'apiCooldownUntil', 'aiPersona', 'competitorReport'], (result) => {
-    if (!result.isRunning) return;
-
-    // Priority Engine: Must have persona and competitor report before browsing/replying
-    const isPersonaEmpty = !result.aiPersona || (!result.aiPersona.targetUsers && !result.aiPersona.characteristics && !result.aiPersona.goals);
-    if (isPersonaEmpty || !result.competitorReport) return;
-
-    // Find all tweet articles on the page
-    const tweets = document.querySelectorAll('article[data-testid="tweet"]');
-    
-    let processedOneInBatch = false;
-
-    tweets.forEach(tweetNode => {
-      if (processedOneInBatch) return; // Only process max 1 tweet per batch
-      
-      // Avoid processing already processed tweets
-      if (tweetNode.hasAttribute('data-bot-processed')) return;
-      
-      const textDiv = tweetNode.querySelector('div[data-testid="tweetText"]');
-      if (textDiv) {
-        // Mark as processed immediately to prevent duplicate triggers
-        tweetNode.setAttribute('data-bot-processed', 'true');
-        
-        const now = Date.now();
-        if (result.twitterCooldownUntil && now < result.twitterCooldownUntil) return;
-        if (result.apiCooldownUntil && now < result.apiCooldownUntil) return;
-        
-        processedOneInBatch = true;
-        chrome.storage.local.set({ isGeneratingReply: true });
-        
-        const textContent = textDiv.innerText;
-        addLog('info', `发现新推文，准备生成回复: ${textContent.substring(0, 40)}...`);
-        
-        // Trigger background to generate AI response
-        chrome.runtime.sendMessage({
-          action: "generateReply",
-          tweetContent: textContent
-        }, (response) => {
-          chrome.storage.local.set({ isGeneratingReply: false });
-          if (response && response.success) {
-            // Set full 60s cooldown to prevent sending multiple replies quickly
-            chrome.storage.local.set({ twitterCooldownUntil: Date.now() + REPLY_COOLDOWN_MS });
-            
-            addLog('success', `AI 回复生成成功: ${response.replyText.substring(0, 40)}...`);
-            // Dispatch custom event so the automator can handle typing and clicking
-            const event = new CustomEvent('xAutoBot_ReadyToReply', {
-              detail: {
-                tweetElementId: getUniqueIdForNode(tweetNode),
-                replyText: response.replyText
-              }
-            });
-            // Attach unique ID to node
-            tweetNode.setAttribute('data-bot-id', event.detail.tweetElementId);
-            window.dispatchEvent(event);
-            
-            // Update stats
-            updateStats();
-          } else {
-            addLog('error', `回复生成失败: ${response ? response.error : 'Unknown error'}`);
-            // API failed (e.g. rate limit), trigger API cooldown
-            chrome.storage.local.set({ apiCooldownUntil: Date.now() + REPLY_COOLDOWN_MS });
-          }
-        });
-      }
-    });
-  });
-}
-
-function getUniqueIdForNode(node) {
-  return 'bot_' + Math.random().toString(36).substr(2, 9);
-}
-
-function updateStats() {
-  if (!chrome.runtime?.id) return;
-  chrome.storage.local.get(['stats'], (result) => {
-    let stats = result.stats || { tweetsProcessed: 0, repliesSent: 0 };
-    stats.tweetsProcessed += 1;
-    chrome.storage.local.set({ stats });
-  });
-}
-
-// Observe timeline changes to scrape new tweets dynamically
-const observer = new MutationObserver(() => {
-  scrapeTweets();
-});
-
-// Start observing when the timeline container is ready
-function initObserver() {
-  const mainNode = document.querySelector('main');
-  if (mainNode) {
-    observer.observe(mainNode, { childList: true, subtree: true });
-    addLog('info', '已开始监听时间线动态');
-  } else {
-    setTimeout(initObserver, 2000);
-  }
-}
-
-initObserver();
-
 // Auto Scroll Logic
+// ==========================================
 let scrollInterval = null;
 
 function startAutoScroll() {
   if (scrollInterval) return;
-  addLog('info', '启动自动滚动模拟');
+  addLog('info', '启动自动滚动时间线');
   scrollInterval = setInterval(() => {
-    if (!chrome.runtime?.id) { stopAutoScroll(); return; }
-    const scrollAmount = Math.floor(Math.random() * 500) + 300;
-    window.scrollBy({ top: scrollAmount, behavior: 'smooth' });
-  }, Math.floor(Math.random() * 3000) + 5000); // 5-8 seconds
+    window.scrollBy({ top: 300, behavior: 'smooth' });
+    setTimeout(() => {
+      window.scrollBy({ top: -200, behavior: 'smooth' });
+    }, 800);
+  }, 3000);
 }
 
 function stopAutoScroll() {
@@ -211,296 +113,146 @@ function ensureBioExtracted() {
       const profilePath = new URL(profileLinkNode.href).pathname;
       if (window.location.pathname.includes(profilePath)) {
         // We are on the profile page, wait for UserDescription
-        // 如果当前就在 Profile 页，从 65% 开始（跳过了打开页面的阶段）
         setProfileProgress('waiting_bio', '正在 Profile 页面等待简介 DOM...', 65);
         const bioNode = document.querySelector('div[data-testid="UserDescription"]');
         if (bioNode) {
+          const bioText = bioNode.innerText.trim();
+          chrome.storage.local.set({ accountBio: bioText }, () => {
+            addLog('success', `主页简介已提取: ${bioText.substring(0, 30)}...`);
+            setProfileProgress('extracted', '主页简介已读取', 100);
+          });
           clearInterval(checkInterval);
-          const bioText = bioNode.innerText || "无简介";
-          addLog('success', `主页简介提取成功: ${bioText.substring(0, 50)}${bioText.length > 50 ? '...' : ''}`);
-          setProfileProgress('extracted', '主页简介读取完成', 100);
-          chrome.storage.local.set({ accountBio: bioText });
-        } else if (checkCount % 3 === 0) {
-          addLog('info', '等待 UserDescription DOM 渲染...');
+          return;
+        }
+        if (checkCount > 20) {
+          addLog('warn', '在 Profile 页面等待简介超时，尝试从当前页面提取...');
+          chrome.storage.local.set({ accountBio: document.querySelector('div[data-testid="UserDescription"]')?.innerText?.trim() || '' });
+          setProfileProgress('extracted', '已尝试提取', 100);
+          clearInterval(checkInterval);
         }
       } else {
-        // Not on profile page, ask background to open it
-        clearInterval(checkInterval);
-        addLog('info', `当前不在 Profile 页，准备打开: ${profilePath}`);
-        setProfileProgress('opening_profile', '正在打开 Profile 页面...', 35);
-        chrome.runtime.sendMessage({ action: "extractBio", profileUrl: profilePath });
+        // Not on profile page, open it in background
+        if (checkCount === 1) {
+          setProfileProgress('opening_page', '正在打开 Profile 页面...', 35);
+          addLog('info', '当前不在 Profile 页面，后台静默打开...');
+          chrome.runtime.sendMessage({ action: 'openProfileTab', url: `https://x.com${profilePath}` });
+        }
+        if (checkCount > 15) {
+          addLog('warn', '等待 Profile 页面加载超时，跳过简介提取');
+          chrome.storage.local.set({ accountBio: '' });
+          setProfileProgress('failed', '简介提取超时', 100);
+          clearInterval(checkInterval);
+        }
       }
     }, 1000);
   });
 }
 
 // ==========================================
-// Widget UI Logic
+// Tweet Scraping Logic
 // ==========================================
-const widgetStyles = `
-  #x-auto-bot-widget {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    width: 360px;
-    max-height: 85vh;
-    overflow-y: auto;
-    background: rgba(21, 32, 43, 0.9);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 16px;
-    color: #fff;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    padding: 16px;
-    z-index: 999999;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-    transition: opacity 0.3s ease, transform 0.3s ease;
-    transform: translateY(0);
+function getTweetAuthor(tweetNode) {
+  const userLinks = tweetNode.querySelectorAll('a[href^="/"]');
+  for (const link of userLinks) {
+    const match = link.getAttribute('href').match(/^\/(\w{1,15})\/?$/);
+    if (match) return match[1];
   }
-  #x-auto-bot-widget.hidden {
-    opacity: 0;
-    pointer-events: none;
-    transform: translateY(20px);
+  const nameDiv = tweetNode.querySelector('div[data-testid="User-Name"]');
+  if (nameDiv) {
+    const atText = nameDiv.innerText.match(/@(\w{1,15})/);
+    if (atText) return atText[1];
   }
-  #x-auto-bot-widget::-webkit-scrollbar {
-    width: 4px;
-  }
-  #x-auto-bot-widget::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,0.15);
-    border-radius: 2px;
-  }
-  .x-bot-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
-    padding-bottom: 12px;
-    margin-bottom: 12px;
-  }
-  .x-bot-header-left {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 15px;
-    font-weight: 600;
-  }
-  .x-bot-header-time {
-    font-size: 12px;
-    color: rgba(255,255,255,0.6);
-    font-variant-numeric: tabular-nums;
-  }
-  .x-bot-pulse {
-    width: 8px;
-    height: 8px;
-    background-color: #00BA7C;
-    border-radius: 50%;
-    animation: x-bot-pulse 2s infinite;
-  }
-  @keyframes x-bot-pulse {
-    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 186, 124, 0.7); }
-    70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(0, 186, 124, 0); }
-    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 186, 124, 0); }
-  }
-  .x-bot-status-panel {
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 8px;
-    padding: 12px;
-    margin-bottom: 12px;
-    border: 1px solid rgba(255,255,255,0.05);
-  }
-  .x-bot-status-label {
-    font-size: 11px;
-    color: rgba(255,255,255,0.5);
-    margin-bottom: 6px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-  .x-bot-status-text {
-    font-size: 14px;
-    font-weight: 500;
-    color: #1DA1F2;
-    line-height: 1.4;
-  }
-  
-  /* Profile Progress Bar */
-  .x-bot-progress-panel {
-    background: rgba(0, 0, 0, 0.15);
-    border-radius: 8px;
-    padding: 10px 12px;
-    margin-bottom: 12px;
-    border: 1px solid rgba(255,255,255,0.05);
-  }
-  .x-bot-progress-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 6px;
-  }
-  .x-bot-progress-title {
-    font-size: 11px;
-    color: rgba(255,255,255,0.6);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-  .x-bot-progress-percent {
-    font-size: 11px;
-    color: #00BA7C;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-  }
-  .x-bot-progress-bar-bg {
-    width: 100%;
-    height: 6px;
-    background: rgba(255,255,255,0.08);
-    border-radius: 3px;
-    overflow: hidden;
-    margin-bottom: 6px;
-  }
-  .x-bot-progress-bar-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #1DA1F2, #00BA7C);
-    border-radius: 3px;
-    transition: width 0.5s ease;
-  }
-  .x-bot-progress-msg {
-    font-size: 12px;
-    color: rgba(255,255,255,0.7);
-  }
-  .x-bot-progress-msg.done {
-    color: #00BA7C;
-  }
-  .x-bot-progress-msg.error {
-    color: #ff4d4f;
-  }
-  
-  .x-bot-milestones {
-    font-size: 12px;
-  }
-  .x-bot-milestone {
-    display: flex;
-    align-items: center;
-    margin-bottom: 8px;
-    color: rgba(255,255,255,0.7);
-  }
-  .x-bot-milestone.done { color: rgba(255,255,255,0.4); }
-  .x-bot-icon { margin-right: 8px; font-size: 13px; min-width: 16px; text-align: center; }
-  .x-bot-next-post {
-    margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px dashed rgba(255,255,255,0.1);
-    font-size: 12px;
-    color: rgba(255,255,255,0.5);
-    text-align: center;
-  }
-  
-  /* Log Panel */
-  .x-bot-log-panel {
-    margin-top: 12px;
-    border-top: 1px solid rgba(255,255,255,0.08);
-    padding-top: 10px;
-  }
-  .x-bot-log-toggle {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    cursor: pointer;
-    font-size: 11px;
-    color: rgba(255,255,255,0.5);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 8px;
-    user-select: none;
-  }
-  .x-bot-log-toggle:hover {
-    color: rgba(255,255,255,0.8);
-  }
-  .x-bot-log-toggle-icon {
-    font-size: 10px;
-    transition: transform 0.2s ease;
-  }
-  .x-bot-log-toggle-icon.open {
-    transform: rotate(90deg);
-  }
-  .x-bot-log-list {
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height 0.3s ease;
-    font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace;
-  }
-  .x-bot-log-list.open {
-    max-height: 240px;
-    overflow-y: auto;
-  }
-  .x-bot-log-list::-webkit-scrollbar {
-    width: 3px;
-  }
-  .x-bot-log-list::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,0.1);
-    border-radius: 2px;
-  }
-  .x-bot-log-item {
-    font-size: 10px;
-    line-height: 1.5;
-    padding: 2px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.03);
-    display: flex;
-    gap: 6px;
-  }
-  .x-bot-log-time {
-    color: rgba(255,255,255,0.3);
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-  .x-bot-log-level {
-    flex-shrink: 0;
-    min-width: 14px;
-  }
-  .x-bot-log-msg {
-    color: rgba(255,255,255,0.75);
-    word-break: break-all;
-  }
-  .x-bot-log-msg.info { color: rgba(255,255,255,0.75); }
-  .x-bot-log-msg.success { color: #00BA7C; }
-  .x-bot-log-msg.warn { color: #f5a623; }
-  .x-bot-log-msg.error { color: #ff4d4f; }
-  
-  /* Config Alert Panel */
-  .x-bot-config-alert {
-    background: rgba(255, 77, 79, 0.12);
-    border: 1px solid rgba(255, 77, 79, 0.3);
-    border-radius: 8px;
-    padding: 10px 12px;
-    margin-bottom: 12px;
-  }
-  .x-bot-config-alert-title {
-    font-size: 12px;
-    font-weight: 600;
-    color: #ff4d4f;
-    margin-bottom: 4px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .x-bot-config-alert-items {
-    font-size: 12px;
-    color: rgba(255, 200, 200, 0.9);
-    line-height: 1.5;
-  }
-  .x-bot-config-alert-hint {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.4);
-    margin-top: 4px;
-  }
-`;
-
-if (!document.getElementById('x-auto-bot-styles')) {
-  const styleEl = document.createElement('style');
-  styleEl.id = 'x-auto-bot-styles';
-  styleEl.textContent = widgetStyles;
-  document.head.appendChild(styleEl);
+  return '未知用户';
 }
 
+function getTweetText(tweetNode) {
+  const textDiv = tweetNode.querySelector('div[data-testid="tweetText"]');
+  if (textDiv) return textDiv.innerText.trim();
+  const altText = tweetNode.querySelector('[data-testid="tweet"] span');
+  if (altText) return altText.innerText.trim();
+  return '';
+}
+
+let processedTweetIds = new Set();
+let isReplying = false;
+let twitterCooldownUntil = 0;
+let apiCooldownUntil = 0;
+
+function scrapeTweets() {
+  if (!chrome.runtime?.id) return;
+  if (isReplying) return;
+  if (Date.now() < twitterCooldownUntil) return;
+  if (Date.now() < apiCooldownUntil) return;
+
+  chrome.storage.local.get(['isRunning', 'aiPersona', 'competitorReport', 'twitterCooldownUntil', 'apiCooldownUntil'], (result) => {
+    if (!result.isRunning) return;
+    if (result.twitterCooldownUntil && Date.now() < result.twitterCooldownUntil) return;
+    if (result.apiCooldownUntil && Date.now() < result.apiCooldownUntil) return;
+    
+    const persona = result.aiPersona;
+    const hasPersona = persona && (persona.targetUsers || persona.characteristics || persona.goals);
+    if (!hasPersona || !result.competitorReport) return;
+    
+    const articles = document.querySelectorAll('article[data-testid="tweet"]');
+    if (articles.length === 0) return;
+    
+    for (const article of articles) {
+      const tweetId = article.getAttribute('data-testid') + '_' + (article.querySelector('a[href*="/status/"]')?.getAttribute('href') || Math.random());
+      
+      if (processedTweetIds.has(tweetId)) continue;
+      processedTweetIds.add(tweetId);
+      
+      const author = getTweetAuthor(article);
+      const text = getTweetText(article);
+      
+      if (!text || text.length < 10) continue;
+      
+      addLog('info', `发现推文 @${author}: ${text.substring(0, 50)}...`);
+      
+      isReplying = true;
+      twitterCooldownUntil = Date.now() + REPLY_COOLDOWN_MS;
+      chrome.storage.local.set({ twitterCooldownUntil });
+      
+      chrome.runtime.sendMessage({
+        action: 'generateReply',
+        tweetText: text,
+        tweetAuthor: author,
+        tweetElementId: tweetId
+      }, (response) => {
+        isReplying = false;
+        if (chrome.runtime.lastError) {
+          addLog('error', '生成回复失败: ' + chrome.runtime.lastError.message);
+          return;
+        }
+        if (response && response.error) {
+          addLog('error', 'AI 生成回复失败: ' + response.error);
+          if (response.isApiCooldown) {
+            apiCooldownUntil = Date.now() + 60000;
+            chrome.storage.local.set({ apiCooldownUntil });
+          }
+          return;
+        }
+        if (response && response.reply) {
+          const replyText = response.reply;
+          addLog('success', `已生成回复 @${author}: ${replyText.substring(0, 40)}...`);
+          
+          // Dispatch event for automator
+          window.dispatchEvent(new CustomEvent('xAutoBot_ReadyToReply', {
+            detail: { tweetElementId: tweetId, replyText, tweetAuthor: author, tweetContent: text }
+          }));
+        }
+      });
+      
+      break; // Only process one tweet per cycle
+    }
+  });
+}
+
+setInterval(scrapeTweets, 5000);
+
+// ==========================================
+// Widget System
+// ==========================================
 let botState = {};
 let logPanelOpen = false;
 
@@ -518,9 +270,29 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   }
 });
 
+// 高频检查，确保 SPA 路由切换后 widget 能快速恢复
+setInterval(() => {
+  if (botState.isRunning) ensureWidget();
+}, 200);
+
+// 每秒刷新 widget 内容（时间、状态、倒计时等）
 setInterval(() => {
   if (botState.isRunning) renderWidget();
 }, 1000);
+
+function ensureWidget() {
+  if (!chrome.runtime?.id) return;
+  let widget = document.getElementById('x-auto-bot-widget');
+  if (!botState.isRunning) {
+    if (widget) widget.classList.add('hidden');
+    return;
+  }
+  if (!widget) {
+    renderWidget();
+  } else if (widget.classList.contains('hidden')) {
+    widget.classList.remove('hidden');
+  }
+}
 
 function formatLogTime(ts) {
   const d = new Date(ts);
@@ -544,10 +316,26 @@ function getWidgetConfigErrors(state) {
   return errors;
 }
 
+function createLogItem(log) {
+  const div = document.createElement('div');
+  div.className = 'x-bot-log-item';
+  div.dataset.time = String(log.time);
+  const time = formatLogTime(log.time);
+  const level = log.level || 'info';
+  const emoji = getLevelEmoji(level);
+  div.innerHTML = `
+    <span class="x-bot-log-time">${time}</span>
+    <span class="x-bot-log-level">${emoji}</span>
+    <span class="x-bot-log-msg ${level}">${escapeHtml(log.message)}</span>
+  `;
+  return div;
+}
+
 function renderWidget() {
   if (!chrome.runtime?.id) return;
   
   let widget = document.getElementById('x-auto-bot-widget');
+  const isFirstRender = !widget;
   
   if (!botState.isRunning) {
     if (widget) widget.classList.add('hidden');
@@ -557,7 +345,7 @@ function renderWidget() {
   if (!widget) {
     widget = document.createElement('div');
     widget.id = 'x-auto-bot-widget';
-    document.body.appendChild(widget);
+    (document.body || document.documentElement).appendChild(widget);
   }
   widget.classList.remove('hidden');
 
@@ -617,85 +405,392 @@ function renderWidget() {
   const showProgress = !botState.accountBio && botState.isRunning;
   const progressClass = progress.stage === 'extracted' ? 'done' : (progress.stage === 'failed' ? 'error' : '');
 
-  // Logs
+  // Logs - 正序：最早在前，最新在后
   const logs = botState.logs || [];
-  const recentLogs = logs.slice(-12).reverse();
-  const logListHtml = recentLogs.map(log => {
-    const time = formatLogTime(log.time);
-    const level = log.level || 'info';
-    const emoji = getLevelEmoji(level);
-    return `<div class="x-bot-log-item">
-      <span class="x-bot-log-time">${time}</span>
-      <span class="x-bot-log-level">${emoji}</span>
-      <span class="x-bot-log-msg ${level}">${escapeHtml(log.message)}</span>
-    </div>`;
-  }).join('');
+  const recentLogs = logs.slice(-12);
 
-  widget.innerHTML = `
-    <div class="x-bot-header">
-      <div class="x-bot-header-left">
-        <div class="x-bot-pulse"></div>
-        <span>X-Auto 指挥枢纽</span>
+  if (isFirstRender) {
+    // 首次渲染：生成完整 HTML
+    widget.innerHTML = `
+      <style>
+        #x-auto-bot-widget {
+          position: fixed;
+          bottom: 20px;
+          right: 20px;
+          width: 340px;
+          background: #0f1419;
+          border: 1px solid #2f3336;
+          border-radius: 12px;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+          z-index: 99999;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          font-size: 13px;
+          color: #e7e9ea;
+          overflow: hidden;
+        }
+        #x-auto-bot-widget.hidden { display: none !important; }
+        .x-bot-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 12px 16px;
+          border-bottom: 1px solid #2f3336;
+          background: rgba(29, 161, 242, 0.08);
+        }
+        .x-bot-header-left {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-weight: 600;
+        }
+        .x-bot-pulse {
+          width: 8px;
+          height: 8px;
+          background: #00BA7C;
+          border-radius: 50%;
+          animation: x-bot-pulse 2s infinite;
+        }
+        @keyframes x-bot-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+        .x-bot-header-time {
+          font-family: monospace;
+          font-size: 12px;
+          color: #8899a6;
+        }
+        .x-bot-status-panel {
+          padding: 12px 16px;
+          border-bottom: 1px solid #2f3336;
+        }
+        .x-bot-status-label {
+          font-size: 11px;
+          color: #8899a6;
+          margin-bottom: 4px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+        .x-bot-status-text {
+          font-weight: 500;
+        }
+        .x-bot-config-alert {
+          padding: 12px 16px;
+          background: rgba(255, 77, 79, 0.08);
+          border-left: 3px solid #ff4d4f;
+        }
+        .x-bot-config-alert-title {
+          font-weight: 600;
+          color: #ff4d4f;
+          margin-bottom: 4px;
+        }
+        .x-bot-config-alert-items {
+          font-size: 12px;
+          color: rgba(255, 77, 79, 0.8);
+        }
+        .x-bot-config-alert-hint {
+          font-size: 11px;
+          color: #8899a6;
+          margin-top: 6px;
+        }
+        .x-bot-progress-panel {
+          padding: 12px 16px;
+          border-bottom: 1px solid #2f3336;
+        }
+        .x-bot-progress-header {
+          display: flex;
+          justify-content: space-between;
+          margin-bottom: 8px;
+        }
+        .x-bot-progress-title {
+          font-size: 12px;
+          color: #8899a6;
+        }
+        .x-bot-progress-percent {
+          font-family: monospace;
+          font-size: 12px;
+          color: #1DA1F2;
+        }
+        .x-bot-progress-bar-bg {
+          height: 4px;
+          background: #2f3336;
+          border-radius: 2px;
+          overflow: hidden;
+        }
+        .x-bot-progress-bar-fill {
+          height: 100%;
+          background: #1DA1F2;
+          border-radius: 2px;
+          transition: width 0.3s;
+        }
+        .x-bot-progress-msg {
+          font-size: 11px;
+          margin-top: 6px;
+        }
+        .x-bot-progress-msg.done { color: #00BA7C; }
+        .x-bot-progress-msg.error { color: #ff4d4f; }
+        .x-bot-milestones {
+          padding: 10px 16px;
+          border-bottom: 1px solid #2f3336;
+        }
+        .x-bot-milestone {
+          font-size: 12px;
+          padding: 4px 0;
+          color: rgba(255,255,255,0.6);
+        }
+        .x-bot-milestone.done { color: #00BA7C; }
+        .x-bot-icon { display: inline-block; width: 20px; }
+        .x-bot-next-post {
+          padding: 10px 16px;
+          font-size: 12px;
+          color: #8899a6;
+          border-bottom: 1px solid #2f3336;
+        }
+        .x-bot-log-panel {
+          border-top: 1px solid #2f3336;
+        }
+        .x-bot-log-toggle {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 10px 16px;
+          cursor: pointer;
+          font-size: 12px;
+          color: #8899a6;
+          user-select: none;
+        }
+        .x-bot-log-toggle:hover {
+          background: rgba(255,255,255,0.02);
+        }
+        .x-bot-log-toggle-icon {
+          font-size: 10px;
+          transition: transform 0.2s;
+        }
+        .x-bot-log-toggle-icon.open {
+          transform: rotate(90deg);
+        }
+        .x-bot-log-list {
+          max-height: 0;
+          overflow-y: auto;
+          transition: max-height 0.3s;
+          overscroll-behavior: contain;
+        }
+        .x-bot-log-list.open {
+          max-height: 240px;
+        }
+        .x-bot-log-list::-webkit-scrollbar {
+          width: 4px;
+        }
+        .x-bot-log-list::-webkit-scrollbar-thumb {
+          background: #38444d;
+          border-radius: 2px;
+        }
+        .x-bot-log-item {
+          padding: 6px 16px;
+          font-size: 12px;
+          border-bottom: 1px solid rgba(255,255,255,0.03);
+          display: flex;
+          gap: 6px;
+          align-items: flex-start;
+        }
+        .x-bot-log-time {
+          font-family: monospace;
+          color: #8899a6;
+          white-space: nowrap;
+          font-size: 11px;
+        }
+        .x-bot-log-level {
+          font-size: 11px;
+        }
+        .x-bot-log-msg {
+          flex: 1;
+          word-break: break-word;
+          line-height: 1.4;
+        }
+        .x-bot-log-msg.info { color: rgba(255,255,255,0.75); }
+        .x-bot-log-msg.success { color: #00BA7C; }
+        .x-bot-log-msg.warn { color: #f5a623; }
+        .x-bot-log-msg.error { color: #ff4d4f; }
+      </style>
+      <div class="x-bot-header">
+        <div class="x-bot-header-left">
+          <div class="x-bot-pulse"></div>
+          <span>X-Auto 指挥枢纽</span>
+        </div>
+        <div class="x-bot-header-time">${timeStr}</div>
       </div>
-      <div class="x-bot-header-time">${timeStr}</div>
-    </div>
-    
-    <div class="x-bot-status-panel">
-      <div class="x-bot-status-label">当前绝对焦点状态</div>
-      <div class="x-bot-status-text" style="color: ${isError ? '#ff4d4f' : '#1DA1F2'}">${focusStatus}</div>
-    </div>
-    
-    ${configErrors.length > 0 ? `
-    <div class="x-bot-config-alert">
-      <div class="x-bot-config-alert-title">⚠️ 配置不完整</div>
-      <div class="x-bot-config-alert-items">缺少：${configErrors.join('、')}</div>
-      <div class="x-bot-config-alert-hint">请到扩展配置中心补全后再启动</div>
-    </div>
-    ` : ''}
-    
-    ${showProgress ? `
-    <div class="x-bot-progress-panel">
-      <div class="x-bot-progress-header">
-        <span class="x-bot-progress-title">📋 Profile 读取进度</span>
-        <span class="x-bot-progress-percent">${progress.percent}%</span>
+      
+      <div class="x-bot-status-panel">
+        <div class="x-bot-status-label">当前绝对焦点状态</div>
+        <div class="x-bot-status-text" style="color: ${isError ? '#ff4d4f' : '#1DA1F2'}">${focusStatus}</div>
       </div>
-      <div class="x-bot-progress-bar-bg">
-        <div class="x-bot-progress-bar-fill" style="width: ${progress.percent}%"></div>
+      
+      ${configErrors.length > 0 ? `
+      <div class="x-bot-config-alert">
+        <div class="x-bot-config-alert-title">⚠️ 配置不完整</div>
+        <div class="x-bot-config-alert-items">缺少：${configErrors.join('、')}</div>
+        <div class="x-bot-config-alert-hint">请到扩展配置中心补全后再启动</div>
       </div>
-      <div class="x-bot-progress-msg ${progressClass}">${progress.message}</div>
-    </div>
-    ` : ''}
-    
-    <div class="x-bot-milestones">
-      <div class="x-bot-milestone ${botState.accountBio ? 'done' : ''}">${m1} 读取主页简介</div>
-      <div class="x-bot-milestone ${!isPersonaEmpty ? 'done' : ''}">${m2} AI 账号画像分析</div>
-      <div class="x-bot-milestone ${botState.competitorReport ? 'done' : ''}">${m3} 提取竞品起号策略</div>
-      <div class="x-bot-milestone ${qLen >= 5 ? 'done' : ''}">${m4} 储备发文草稿 (${qLen}/20)</div>
-      <div class="x-bot-milestone"><span class="x-bot-icon">🚀</span> 今日引流互动 (${repliesSent} 次)</div>
-    </div>
-    
-    <div class="x-bot-next-post">
-      下一次发推时间: ${nextPostStr}
-    </div>
-    
-    <div class="x-bot-log-panel">
-      <div class="x-bot-log-toggle" id="x-bot-log-toggle">
-        <span>📜 运行日志 (${logs.length})</span>
-        <span class="x-bot-log-toggle-icon ${logPanelOpen ? 'open' : ''}">▶</span>
+      ` : ''}
+      
+      ${showProgress ? `
+      <div class="x-bot-progress-panel">
+        <div class="x-bot-progress-header">
+          <span class="x-bot-progress-title">📋 Profile 读取进度</span>
+          <span class="x-bot-progress-percent">${progress.percent}%</span>
+        </div>
+        <div class="x-bot-progress-bar-bg">
+          <div class="x-bot-progress-bar-fill" style="width: ${progress.percent}%"></div>
+        </div>
+        <div class="x-bot-progress-msg ${progressClass}">${progress.message}</div>
       </div>
-      <div class="x-bot-log-list ${logPanelOpen ? 'open' : ''}">
-        ${logListHtml || '<div class="x-bot-log-item"><span class="x-bot-log-msg info">暂无日志...</span></div>'}
+      ` : ''}
+      
+      <div class="x-bot-milestones">
+        <div class="x-bot-milestone ${botState.accountBio ? 'done' : ''}">${m1} 读取主页简介</div>
+        <div class="x-bot-milestone ${!isPersonaEmpty ? 'done' : ''}">${m2} AI 账号画像分析</div>
+        <div class="x-bot-milestone ${botState.competitorReport ? 'done' : ''}">${m3} 提取竞品起号策略</div>
+        <div class="x-bot-milestone ${qLen >= 5 ? 'done' : ''}">${m4} 储备发文草稿 (${qLen}/20)</div>
+        <div class="x-bot-milestone"><span class="x-bot-icon">🚀</span> 今日引流互动 (${repliesSent} 次)</div>
       </div>
-    </div>
-  `;
-
-  // Attach toggle listener
-  const toggleBtn = widget.querySelector('#x-bot-log-toggle');
-  if (toggleBtn) {
-    toggleBtn.addEventListener('click', () => {
-      logPanelOpen = !logPanelOpen;
-      renderWidget();
-    });
+      
+      <div class="x-bot-next-post">
+        下一次发推时间: ${nextPostStr}
+      </div>
+      
+      <div class="x-bot-log-panel">
+        <div class="x-bot-log-toggle" id="x-bot-log-toggle">
+          <span>📜 运行日志 (${logs.length})</span>
+          <span class="x-bot-log-toggle-icon ${logPanelOpen ? 'open' : ''}">▶</span>
+        </div>
+        <div class="x-bot-log-list ${logPanelOpen ? 'open' : ''}" id="x-bot-log-list">
+        </div>
+      </div>
+    `;
+    
+    // 填充日志列表（首次渲染）
+    const logListEl = widget.querySelector('#x-bot-log-list');
+    if (logListEl) {
+      if (recentLogs.length === 0) {
+        logListEl.innerHTML = '<div class="x-bot-log-item"><span class="x-bot-log-msg info">暂无日志...</span></div>';
+      } else {
+        recentLogs.forEach(log => logListEl.appendChild(createLogItem(log)));
+      }
+    }
+    
+    // 绑定 toggle 事件
+    const toggleBtn = widget.querySelector('#x-bot-log-toggle');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', () => {
+        logPanelOpen = !logPanelOpen;
+        const list = widget.querySelector('#x-bot-log-list');
+        if (list) list.classList.toggle('open', logPanelOpen);
+        const icon = widget.querySelector('.x-bot-log-toggle-icon');
+        if (icon) icon.classList.toggle('open', logPanelOpen);
+      });
+    }
+  } else {
+    // 非首次渲染：增量更新可变元素
+    const headerTime = widget.querySelector('.x-bot-header-time');
+    if (headerTime) headerTime.textContent = timeStr;
+    
+    const statusText = widget.querySelector('.x-bot-status-text');
+    if (statusText) {
+      statusText.textContent = focusStatus;
+      statusText.style.color = isError ? '#ff4d4f' : '#1DA1F2';
+    }
+    
+    // 更新配置警告（如果状态变化，需要添加或移除）
+    let configAlert = widget.querySelector('.x-bot-config-alert');
+    if (configErrors.length > 0) {
+      if (!configAlert) {
+        configAlert = document.createElement('div');
+        configAlert.className = 'x-bot-config-alert';
+        const statusPanel = widget.querySelector('.x-bot-status-panel');
+        if (statusPanel) statusPanel.after(configAlert);
+      }
+      configAlert.innerHTML = `
+        <div class="x-bot-config-alert-title">⚠️ 配置不完整</div>
+        <div class="x-bot-config-alert-items">缺少：${configErrors.join('、')}</div>
+        <div class="x-bot-config-alert-hint">请到扩展配置中心补全后再启动</div>
+      `;
+      configAlert.style.display = '';
+    } else if (configAlert) {
+      configAlert.style.display = 'none';
+    }
+    
+    // 更新进度条
+    let progressPanel = widget.querySelector('.x-bot-progress-panel');
+    if (showProgress) {
+      if (!progressPanel) {
+        progressPanel = document.createElement('div');
+        progressPanel.className = 'x-bot-progress-panel';
+        const alertEl = widget.querySelector('.x-bot-config-alert') || widget.querySelector('.x-bot-status-panel');
+        if (alertEl) alertEl.after(progressPanel);
+      }
+      const pClass = progress.stage === 'extracted' ? 'done' : (progress.stage === 'failed' ? 'error' : '');
+      progressPanel.innerHTML = `
+        <div class="x-bot-progress-header">
+          <span class="x-bot-progress-title">📋 Profile 读取进度</span>
+          <span class="x-bot-progress-percent">${progress.percent}%</span>
+        </div>
+        <div class="x-bot-progress-bar-bg">
+          <div class="x-bot-progress-bar-fill" style="width: ${progress.percent}%"></div>
+        </div>
+        <div class="x-bot-progress-msg ${pClass}">${progress.message}</div>
+      `;
+      progressPanel.style.display = '';
+    } else if (progressPanel) {
+      progressPanel.style.display = 'none';
+    }
+    
+    // 更新里程碑
+    const milestones = widget.querySelectorAll('.x-bot-milestone');
+    if (milestones.length >= 5) {
+      milestones[0].className = `x-bot-milestone ${botState.accountBio ? 'done' : ''}`;
+      milestones[0].innerHTML = `${m1} 读取主页简介`;
+      milestones[1].className = `x-bot-milestone ${!isPersonaEmpty ? 'done' : ''}`;
+      milestones[1].innerHTML = `${m2} AI 账号画像分析`;
+      milestones[2].className = `x-bot-milestone ${botState.competitorReport ? 'done' : ''}`;
+      milestones[2].innerHTML = `${m3} 提取竞品起号策略`;
+      milestones[3].className = `x-bot-milestone ${qLen >= 5 ? 'done' : ''}`;
+      milestones[3].innerHTML = `${m4} 储备发文草稿 (${qLen}/20)`;
+      milestones[4].innerHTML = `<span class="x-bot-icon">🚀</span> 今日引流互动 (${repliesSent} 次)`;
+    }
+    
+    // 更新下次发推时间
+    const nextPostEl = widget.querySelector('.x-bot-next-post');
+    if (nextPostEl) nextPostEl.textContent = `下一次发推时间: ${nextPostStr}`;
+    
+    // 更新日志数量
+    const logToggleSpan = widget.querySelector('#x-bot-log-toggle span:first-child');
+    if (logToggleSpan) logToggleSpan.textContent = `📜 运行日志 (${logs.length})`;
+    
+    // 增量更新日志列表：只追加新日志，不动已有 DOM
+    const logListEl = widget.querySelector('#x-bot-log-list');
+    if (logListEl) {
+      const existingItems = logListEl.querySelectorAll('.x-bot-log-item[data-time]');
+      const existingTimes = new Set(Array.from(existingItems).map(el => Number(el.dataset.time)));
+      
+      // 追加新日志到底部
+      recentLogs.forEach(log => {
+        if (!existingTimes.has(log.time)) {
+          logListEl.appendChild(createLogItem(log));
+        }
+      });
+      
+      // 移除已不在 recentLogs 中的旧日志（截断情况）
+      const recentTimes = new Set(recentLogs.map(l => l.time));
+      existingItems.forEach(el => {
+        if (!recentTimes.has(Number(el.dataset.time))) {
+          el.remove();
+        }
+      });
+      
+      // 如果没有日志了，显示空状态
+      if (recentLogs.length === 0 && logListEl.children.length === 0) {
+        logListEl.innerHTML = '<div class="x-bot-log-item"><span class="x-bot-log-msg info">暂无日志...</span></div>';
+      }
+    }
   }
 }
 
@@ -704,3 +799,5 @@ function escapeHtml(text) {
   div.textContent = text;
   return div.innerHTML;
 }
+
+})();

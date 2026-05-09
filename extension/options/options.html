@@ -60,6 +60,32 @@
           <p class="help-text">AI 会在生成的回复中，寻找合适的机会软性植入这段引流信息，吸引用户点击或关注。</p>
         </div>
       </section>
+
+      <section class="card">
+        <h2>⏰ 发推调度策略</h2>
+        <div class="form-group">
+          <label for="postsPerDay">每日最大发推数</label>
+          <input type="number" id="postsPerDay" min="1" max="50" value="10" style="width: 120px;" />
+          <p class="help-text">超过此数量后，当天不再自动发推，顺延至次日。</p>
+        </div>
+        <div class="form-group">
+          <label for="postScheduleMode">调度模式</label>
+          <select id="postScheduleMode" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: #fff; font-size: 14px; appearance: menulist;">
+            <option value="smart">智能时段分布（按设定时段均匀分布）</option>
+            <option value="interval">固定间隔（每隔 N 分钟发一条）</option>
+          </select>
+        </div>
+        <div class="form-group" id="smartSlotsGroup">
+          <label for="smartTimeSlots">发推时段（格式：开始-结束, 用逗号分隔）</label>
+          <input type="text" id="smartTimeSlots" value="8-10,12-14,19-23" placeholder="例如：8-10,12-14,19-23" />
+          <p class="help-text">24小时制，每个时段内只会安排一条发推，自动跳转到下一个时段。当前时段内不会重复发推。</p>
+        </div>
+        <div class="form-group" id="intervalGroup" style="display: none;">
+          <label for="postInterval">发推间隔（分钟）</label>
+          <input type="number" id="postInterval" min="5" max="1440" value="60" style="width: 120px;" />
+          <p class="help-text">从上一条发推完成的时间开始计算，固定间隔 N 分钟后发下一条。</p>
+        </div>
+      </section>
       <section class="card">
         <h2>🧠 AI 账号画像分析 (自动生成，可修改)</h2>
         <p class="help-text" style="margin-bottom: 12px;">当系统读取到您的 X 主页简介时，会自动通过大模型推断以下信息，用于指导自动发帖与回复风格。您可以自由审阅并手动修改这些内容以校准 AI。</p>
