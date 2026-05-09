@@ -5,7 +5,7 @@
 console.log("X Auto Bot: Scraper loaded on X.com");
 
 // Global cooldown to prevent hitting Gemini API rate limits (15 requests/min)
-const REPLY_COOLDOWN_MS = 60000; // 60 seconds
+const REPLY_COOLDOWN_MS = 300000; // 5 minutes
 const MAX_LOGS = 50;
 
 // ==========================================
@@ -42,24 +42,60 @@ function setProfileProgress(stage, message, percent) {
 // Auto Scroll Logic
 // ==========================================
 let scrollInterval = null;
+let restTimeout = null;
+let scrollCountInCycle = 0;
 
 function startAutoScroll() {
-  if (scrollInterval) return;
-  addLog('info', '启动自动滚动时间线');
-  scrollInterval = setInterval(() => {
-    window.scrollBy({ top: 300, behavior: 'smooth' });
-    setTimeout(() => {
-      window.scrollBy({ top: -200, behavior: 'smooth' });
-    }, 800);
-  }, 3000);
+  if (scrollInterval || restTimeout) return;
+  chrome.storage.local.get(['isAutoPaused'], (result) => {
+    if (result.isAutoPaused) {
+      addLog('info', '自动操作已暂停，不启动自动滚动');
+      return;
+    }
+    addLog('info', '启动自动滚动时间线');
+    beginScrollCycle();
+  });
+}
+
+function beginScrollCycle() {
+  scrollCountInCycle = 0;
+  const scrollsInThisCycle = 3 + Math.floor(Math.random() * 4); // 3~6 次
+  addLog('info', `本轮计划滚动 ${scrollsInThisCycle} 次，然后休息`);
+
+  function doOneScroll() {
+    scrollCountInCycle++;
+    const distance = 400 + Math.floor(Math.random() * 400); // 400~800 px，只向下
+    window.scrollBy({ top: distance, behavior: 'smooth' });
+
+    if (scrollCountInCycle >= scrollsInThisCycle) {
+      // 本轮滚动结束，进入休息
+      clearInterval(scrollInterval);
+      scrollInterval = null;
+      const restSec = 20 + Math.floor(Math.random() * 21); // 20~40 秒休息
+      addLog('info', `滚动本轮结束，休息 ${restSec} 秒...`);
+      restTimeout = setTimeout(() => {
+        restTimeout = null;
+        beginScrollCycle();
+      }, restSec * 1000);
+    }
+  }
+
+  // 首次立即滚动一次
+  doOneScroll();
+  // 后续每隔 2~5 秒滚动一次
+  scrollInterval = setInterval(doOneScroll, 2000 + Math.floor(Math.random() * 3000));
 }
 
 function stopAutoScroll() {
   if (scrollInterval) {
     clearInterval(scrollInterval);
     scrollInterval = null;
-    addLog('info', '停止自动滚动');
   }
+  if (restTimeout) {
+    clearTimeout(restTimeout);
+    restTimeout = null;
+  }
+  addLog('info', '停止自动滚动');
 }
 
 chrome.storage.onChanged.addListener((changes, namespace) => {
@@ -86,7 +122,8 @@ chrome.storage.local.get(['isRunning'], (result) => {
 // ==========================================
 function ensureBioExtracted() {
   if (!chrome.runtime?.id) return;
-  chrome.storage.local.get(['accountBio', 'isRunning', 'profileReadProgress'], (result) => {
+  chrome.storage.local.get(['accountBio', 'isRunning', 'profileReadProgress', 'isAutoPaused'], (result) => {
+    if (result.isAutoPaused) return;
     if (!result.isRunning || result.accountBio) {
       if (result.accountBio) {
         setProfileProgress('extracted', '主页简介已读取', 100);
@@ -184,8 +221,12 @@ function scrapeTweets() {
   if (Date.now() < twitterCooldownUntil) return;
   if (Date.now() < apiCooldownUntil) return;
 
-  chrome.storage.local.get(['isRunning', 'aiPersona', 'competitorReport', 'twitterCooldownUntil', 'apiCooldownUntil'], (result) => {
+  chrome.storage.local.get(['isRunning', 'isAutoPaused', 'aiPersona', 'competitorReport', 'twitterCooldownUntil', 'apiCooldownUntil'], (result) => {
     if (!result.isRunning) return;
+    if (result.isAutoPaused) {
+      addLog('info', '自动操作已暂停，跳过推文抓取');
+      return;
+    }
     if (result.twitterCooldownUntil && Date.now() < result.twitterCooldownUntil) return;
     if (result.apiCooldownUntil && Date.now() < result.apiCooldownUntil) return;
     
@@ -266,6 +307,10 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     Object.keys(changes).forEach(key => {
       botState[key] = changes[key].newValue;
     });
+    if (changes.isAutoPaused && changes.isAutoPaused.newValue) {
+      stopAutoScroll();
+      addLog('info', '自动操作已暂停，停止自动滚动');
+    }
     renderWidget();
   }
 });
@@ -610,6 +655,34 @@ function renderWidget() {
         .x-bot-log-msg.success { color: #00BA7C; }
         .x-bot-log-msg.warn { color: #f5a623; }
         .x-bot-log-msg.error { color: #ff4d4f; }
+        .x-bot-pause-panel {
+          padding: 12px 16px;
+          background: rgba(255, 77, 79, 0.12);
+          border-left: 3px solid #ff4d4f;
+        }
+        .x-bot-pause-title {
+          font-weight: 600;
+          color: #ff4d4f;
+          margin-bottom: 6px;
+        }
+        .x-bot-pause-reason {
+          font-size: 12px;
+          color: rgba(255, 255, 255, 0.8);
+          margin-bottom: 10px;
+        }
+        .x-bot-resume-btn {
+          background: #ff4d4f;
+          color: #fff;
+          border: none;
+          padding: 6px 14px;
+          border-radius: 6px;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .x-bot-resume-btn:hover {
+          background: #ff7875;
+        }
       </style>
       <div class="x-bot-header">
         <div class="x-bot-header-left">
@@ -623,6 +696,14 @@ function renderWidget() {
         <div class="x-bot-status-label">当前绝对焦点状态</div>
         <div class="x-bot-status-text" style="color: ${isError ? '#ff4d4f' : '#1DA1F2'}">${focusStatus}</div>
       </div>
+      
+      ${botState.isAutoPaused ? `
+      <div class="x-bot-pause-panel" id="x-bot-pause-panel">
+        <div class="x-bot-pause-title">🛑 自动操作已暂停</div>
+        <div class="x-bot-pause-reason">${escapeHtml(botState.pauseReason || '操作失败，等待人工干预')}</div>
+        <button class="x-bot-resume-btn" id="x-bot-resume-btn">▶ 继续自动运行</button>
+      </div>
+      ` : ''}
       
       ${configErrors.length > 0 ? `
       <div class="x-bot-config-alert">
@@ -688,6 +769,18 @@ function renderWidget() {
         if (icon) icon.classList.toggle('open', logPanelOpen);
       });
     }
+    
+    // 绑定继续运行按钮
+    const resumeBtn = widget.querySelector('#x-bot-resume-btn');
+    if (resumeBtn) {
+      resumeBtn.addEventListener('click', () => {
+        chrome.storage.local.set({ isAutoPaused: false, pauseReason: '' }, () => {
+          addLog('info', '用户手动恢复自动运行');
+          const pausePanel = widget.querySelector('#x-bot-pause-panel');
+          if (pausePanel) pausePanel.remove();
+        });
+      });
+    }
   } else {
     // 非首次渲染：增量更新可变元素
     const headerTime = widget.querySelector('.x-bot-header-time');
@@ -697,6 +790,36 @@ function renderWidget() {
     if (statusText) {
       statusText.textContent = focusStatus;
       statusText.style.color = isError ? '#ff4d4f' : '#1DA1F2';
+    }
+    
+    // 更新暂停面板
+    let pausePanel = widget.querySelector('#x-bot-pause-panel');
+    if (botState.isAutoPaused) {
+      if (!pausePanel) {
+        pausePanel = document.createElement('div');
+        pausePanel.id = 'x-bot-pause-panel';
+        pausePanel.className = 'x-bot-pause-panel';
+        const statusPanel = widget.querySelector('.x-bot-status-panel');
+        if (statusPanel) statusPanel.after(pausePanel);
+      }
+      pausePanel.innerHTML = `
+        <div class="x-bot-pause-title">🛑 自动操作已暂停</div>
+        <div class="x-bot-pause-reason">${escapeHtml(botState.pauseReason || '操作失败，等待人工干预')}</div>
+        <button class="x-bot-resume-btn" id="x-bot-resume-btn">▶ 继续自动运行</button>
+      `;
+      pausePanel.style.display = '';
+      // 绑定继续按钮
+      const resumeBtn = pausePanel.querySelector('#x-bot-resume-btn');
+      if (resumeBtn) {
+        resumeBtn.addEventListener('click', () => {
+          chrome.storage.local.set({ isAutoPaused: false, pauseReason: '' }, () => {
+            addLog('info', '用户手动恢复自动运行');
+            if (pausePanel) pausePanel.remove();
+          });
+        });
+      }
+    } else if (pausePanel) {
+      pausePanel.remove();
     }
     
     // 更新配置警告（如果状态变化，需要添加或移除）

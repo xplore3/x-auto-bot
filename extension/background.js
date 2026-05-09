@@ -29,7 +29,7 @@ chrome.runtime.onInstalled.addListener(() => {
         targetUsers: '',
         promptTemplate: '你是一个社交媒体引流专家。请根据推文内容，给出一段简短、神回复级别的评论（不超过 40 个字）。\n如果合适的话，请巧妙、自然地顺带提及我的【引流信息】，千万不要显得像生硬的广告，要像朋友间的随口分享：\n\n【推文】：{tweet}\n【引流信息】：{leadTarget}\n\n回复：',
         leadTarget: '',
-        postInterval: 60,
+        postInterval: 30,
         replyInterval: 30
       });
     }
@@ -198,9 +198,13 @@ function parseTimeSlots(slotsStr) {
 function scheduleNextPost() {
   const now = new Date();
   chrome.storage.local.get([
-    'postsToday', 'lastPostDate',
+    'postsToday', 'lastPostDate', 'isAutoPaused',
     'postsPerDay', 'postScheduleMode', 'smartTimeSlots', 'postInterval'
   ], (res) => {
+    if (res.isAutoPaused) {
+      addLog('info', '自动操作已暂停，跳过发推调度');
+      return;
+    }
     const postsToday = (res.lastPostDate === now.toDateString()) ? (res.postsToday || 0) : 0;
     const postsPerDay = res.postsPerDay || 10;
     const mode = res.postScheduleMode || 'smart';
@@ -307,7 +311,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 function executeNextPost() {
-  chrome.storage.local.get(['tweetQueue', 'pendingPost', 'postsToday', 'lastPostDate', 'postsPerDay'], (result) => {
+  chrome.storage.local.get(['tweetQueue', 'pendingPost', 'postsToday', 'lastPostDate', 'postsPerDay', 'isAutoPaused'], (result) => {
+    if (result.isAutoPaused) {
+      addLog('info', '自动操作已暂停，跳过本次发推执行');
+      return;
+    }
     let queue = result.tweetQueue || [];
     if (queue.length === 0) {
       checkAndSetupAlarm();

@@ -6,6 +6,17 @@ console.log("X Auto Bot: Automator loaded on X.com");
 
 const MAX_LOGS = 50;
 let isAutomatorBusy = false;
+let consecutiveFailures = 0;
+
+function checkAndPause() {
+  if (consecutiveFailures >= 2) {
+    addLog('error', `连续 ${consecutiveFailures} 次操作失败，已暂停自动操作，等待人工干预`);
+    chrome.storage.local.set({
+      isAutoPaused: true,
+      pauseReason: '连续发推/回复失败，请检查当前页面状态后手动点击继续'
+    });
+  }
+}
 
 function addLog(level, message) {
   if (!chrome.runtime?.id) return;
@@ -140,9 +151,12 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
         const shortReply = replyText.substring(0, 80) + (replyText.length > 80 ? '...' : '');
         
         if (modalGone) {
+          consecutiveFailures = 0;
           addLog('success', `✅ 已回复 @${author} | 原文：「${shortOriginal}」→ 回复：「${shortReply}」`);
         } else {
-          addLog('warn', `⚠️ 弹窗仍在，可能发送失败，请手动检查 @${author} 的回复`);
+          consecutiveFailures++;
+          addLog('warn', `⚠️ 弹窗仍在，可能发送失败，请手动检查 @${author} 的回复 (连续失败 ${consecutiveFailures} 次)`);
+          checkAndPause();
         }
         
         // Update reply stats
@@ -152,11 +166,15 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
           chrome.storage.local.set({ stats });
         });
       } else {
-        addLog('error', '未找到发送按钮，回复未完成');
+        consecutiveFailures++;
+        addLog('error', `未找到发送按钮，回复未完成 (连续失败 ${consecutiveFailures} 次)`);
+        checkAndPause();
       }
       
     } catch (error) {
-      addLog('error', `自动回复异常: ${error.message}`);
+      consecutiveFailures++;
+      addLog('error', `自动回复异常: ${error.message} (连续失败 ${consecutiveFailures} 次)`);
+      checkAndPause();
     } finally {
       chrome.storage.local.set({ isTyping: false });
       isAutomatorBusy = false;
@@ -318,19 +336,25 @@ async function handlePendingPost() {
           
           const modalGone = !(document.querySelector('div[role="dialog"]') || document.querySelector('div[data-testid="tweetTextarea_0"]'));
           if (modalGone) {
+            consecutiveFailures = 0;
             addLog('success', '定时推文发送成功！');
             chrome.storage.local.remove(['pendingPost']);
           } else {
-            addLog('warn', '弹窗仍在，发推可能未完成');
-            chrome.storage.local.remove(['pendingPost']);
+            consecutiveFailures++;
+            addLog('warn', `弹窗仍在，发推可能未完成 (连续失败 ${consecutiveFailures} 次)`);
+            checkAndPause();
           }
         }
       } else {
-        addLog('error', '未找到发推按钮');
+        consecutiveFailures++;
+        addLog('error', `未找到发推按钮 (连续失败 ${consecutiveFailures} 次)`);
+        checkAndPause();
       }
       
     } catch (e) {
-      addLog('error', `定时发文异常: ${e.message}`);
+      consecutiveFailures++;
+      addLog('error', `定时发文异常: ${e.message} (连续失败 ${consecutiveFailures} 次)`);
+      checkAndPause();
     } finally {
       chrome.storage.local.set({ isTyping: false });
       isAutomatorBusy = false;
