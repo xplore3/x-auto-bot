@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>X Voice Agent 策略中心</title>
+  <title>X Voice Agent 长期记忆中心</title>
   <link rel="icon" href="../assets/icons/icon-32.png">
   <link rel="stylesheet" href="options.css">
 </head>
@@ -18,11 +18,13 @@
       </div>
       <nav>
         <a href="#onboarding">启动向导</a>
-        <a href="#strategy">定位策略</a>
-        <a href="#model">模型连接</a>
-        <a href="#publishing">发布节奏</a>
-        <a href="#diagnostics">链路测试</a>
-        <a href="#intelligence">智能分析</a>
+        <a href="#identity">基础身份</a>
+        <a href="#audience">目标读者</a>
+        <a href="#content">内容资产</a>
+        <a href="#beliefs">观点边界</a>
+        <a href="#interaction">互动策略</a>
+        <a href="#runtime">模型与节奏</a>
+        <a href="#diagnostics">测试与分析</a>
         <a href="../logs/logs.html">行动记录</a>
       </nav>
     </aside>
@@ -30,11 +32,11 @@
     <main class="workspace">
       <header class="page-header">
         <div>
-          <p class="eyebrow">Strategy Center</p>
-          <h1>让 Agent 按你的定位持续发声</h1>
-          <p>配置目标用户、表达边界、内容节奏和发布链路。默认保留人工确认，先形成稳定表达系统，再扩大自动化。</p>
+          <p class="eyebrow">Memory Center</p>
+          <h1>AI 发声 Agent 的长期记忆</h1>
+          <p>把账号定位、目标读者、观点资产、表达边界和互动规则沉淀成可持续调用的知识库，让 Agent 能把日常输入转化为稳定输出。</p>
         </div>
-        <button id="saveBtn" class="btn-primary">保存策略</button>
+        <button id="saveBtn" class="btn-primary">保存记忆</button>
       </header>
 
       <section class="panel setup-panel" id="onboarding">
@@ -48,7 +50,7 @@
 
         <div class="setup-layout">
           <div>
-            <p class="setup-copy">登录 X 后，Agent 可以读取你的主页简介，用 AI 自动填写人设、目标用户和内容策略。你可以检查结果并继续手动修改。</p>
+            <p class="setup-copy">授权并登录 X 后，Agent 会读取主页简介，自动补全基础画像、目标用户、内容方向和可编辑的长期记忆。</p>
             <div id="autoSetupStatus" class="setup-status">等待开始。请先确认 X 已登录，并填写 API Key。</div>
           </div>
           <div class="setup-actions">
@@ -58,45 +60,184 @@
         </div>
       </section>
 
-      <section class="panel" id="strategy">
+      <section class="panel" id="identity">
         <div class="panel-head">
           <div>
             <p class="eyebrow">Step 1</p>
-            <h2>定位策略</h2>
+            <h2>基础身份与转化路径</h2>
           </div>
-          <span class="panel-tag">Voice</span>
+          <span class="panel-tag">Identity</span>
         </div>
 
         <div class="field-grid">
           <div class="form-group span-2">
             <label for="leadTarget">引流目标 / 自我介绍 / 行动入口</label>
             <textarea id="leadTarget" rows="4" placeholder="例如：我长期分享 AI 工具、出海项目和个人商业化实操，欢迎关注交流。"></textarea>
-            <p class="help-text">这是 Agent 判断内容转化方向的核心信息，不建议写成硬广告。</p>
+            <p class="help-text">Agent 会用它判断内容转化方向，建议写成可信的自我介绍和低压行动入口。</p>
           </div>
 
           <div class="form-group">
-            <label for="targetUsers">优先关注用户</label>
-            <textarea id="targetUsers" rows="7" placeholder="elonmusk&#10;OpenAI&#10;levelsio"></textarea>
+            <label for="memoryIdentity">我是谁，以及为什么值得关注</label>
+            <textarea id="memoryIdentity" rows="6" placeholder="身份、阶段、正在做的事、长期关注的问题、可公开的经历。"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="aiGoals">发文及引流核心目标</label>
+            <textarea id="aiGoals" rows="6" placeholder="等待 AI 分析，或手动填写：涨粉、建立信任、收集线索、招募用户、影响投资者等。"></textarea>
+          </div>
+
+          <div class="form-group span-2">
+            <label for="proofAssets">可信背书与成果资产</label>
+            <textarea id="proofAssets" rows="5" placeholder="项目经历、数据、客户反馈、研究成果、产品链接、公开案例。避免无法证明的收益承诺。"></textarea>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="audience">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Step 2</p>
+            <h2>目标读者与需求地图</h2>
+          </div>
+          <span class="panel-tag">Audience</span>
+        </div>
+
+        <div class="field-grid">
+          <div class="form-group">
+            <label for="aiTargetUsers">目标用户群体</label>
+            <textarea id="aiTargetUsers" rows="5" placeholder="等待 AI 分析，或手动填写核心读者画像。"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="audienceSegments">读者分层</label>
+            <textarea id="audienceSegments" rows="5" placeholder="创始人、独立开发者、出海从业者、AI 工具人、投资/研究人员等。"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="audiencePains">读者痛点与未被满足的需求</label>
+            <textarea id="audiencePains" rows="6" placeholder="有想法但输出不稳定、会刷 X 但不会提炼观点、想做 KOL 但缺少结构化素材等。"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="marketPosition">账号差异化定位</label>
+            <textarea id="marketPosition" rows="6" placeholder="和同赛道账号相比，你更具体、更可信或更有实操价值的地方。"></textarea>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="content">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Step 3</p>
+            <h2>内容资产库</h2>
+          </div>
+          <span class="panel-tag">Content</span>
+        </div>
+
+        <div class="field-grid">
+          <div class="form-group">
+            <label for="contentPillars">长期内容支柱</label>
+            <textarea id="contentPillars" rows="7" placeholder="AI 工作流、出海增长、个人商业化、产品观察、融资/研究笔记等。"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="contentAngles">可复用选题角度</label>
+            <textarea id="contentAngles" rows="7" placeholder="反常识观点、踩坑复盘、工具对比、案例拆解、框架总结、趋势判断。"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="personalStories">个人故事与案例素材</label>
+            <textarea id="personalStories" rows="7" placeholder="真实经历、项目过程、客户问题、观察到的市场信号、可公开的失败经验。"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="sourceInputs">日常输入来源</label>
+            <textarea id="sourceInputs" rows="7" placeholder="常看的账号、Newsletter、社群、产品榜单、研究报告、客户聊天记录摘要。"></textarea>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="beliefs">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Step 4</p>
+            <h2>观点、语气与边界</h2>
+          </div>
+          <span class="panel-tag">Voice</span>
+        </div>
+
+        <div class="field-grid">
+          <div class="form-group">
+            <label for="coreOpinions">核心观点与立场</label>
+            <textarea id="coreOpinions" rows="7" placeholder="你反复相信、反复强调、愿意长期输出的观点。"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="boundaries">不做什么 / 不碰什么</label>
+            <textarea id="boundaries" rows="7" placeholder="不做擦边、不碰政治、不承诺投资收益、不攻击个人、不伪装经历等。"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="aiCharacteristics">发文特征与人设语气</label>
+            <textarea id="aiCharacteristics" rows="6" placeholder="等待 AI 分析，或手动填写语气、句式、节奏、幽默感、专业度。"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="voiceRules">表达规则</label>
+            <textarea id="voiceRules" rows="6" placeholder="短句、具体、少形容词、先结论后解释、少喊口号、多给判断依据等。"></textarea>
+          </div>
+
+          <div class="form-group span-2">
+            <label for="bannedClaims">禁用话术与风险声明</label>
+            <textarea id="bannedClaims" rows="4" placeholder="不能承诺收益、不能冒充专家资质、不能编造案例、不能诱导私信刷屏。"></textarea>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="interaction">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Step 5</p>
+            <h2>互动与回复策略</h2>
+          </div>
+          <span class="panel-tag">Engagement</span>
+        </div>
+
+        <div class="field-grid">
+          <div class="form-group">
+            <label for="targetUsers">优先关注账号</label>
+            <textarea id="targetUsers" rows="8" placeholder="elonmusk&#10;OpenAI&#10;levelsio"></textarea>
             <p class="help-text">每行一个账号，后续用于浏览、学习和互动。</p>
+          </div>
+
+          <div class="form-group">
+            <label for="interactionTargets">优先互动对象</label>
+            <textarea id="interactionTargets" rows="8" placeholder="小型创始人、AI 产品开发者、正在出海的人、研究型 KOL、潜在用户。"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="replyStrategy">评论引流策略</label>
+            <textarea id="replyStrategy" rows="7" placeholder="先补充观点，再给一个具体经验或反问；只在自然相关时带行动入口。"></textarea>
           </div>
 
           <div class="form-group">
             <label for="promptTemplate">回复 Prompt</label>
             <textarea id="promptTemplate" rows="7" placeholder="你是一个..."></textarea>
-            <p class="help-text">支持 <code>{tweet}</code> 和 <code>{leadTarget}</code> 两个变量。</p>
+            <p class="help-text">支持 <code>{tweet}</code> 和 <code>{leadTarget}</code> 两个变量；高级用户可直接改写。</p>
           </div>
         </div>
       </section>
 
-      <section class="panel" id="model">
+      <section class="panel" id="runtime">
         <div class="panel-head">
           <div>
-            <p class="eyebrow">Step 2</p>
-            <h2>模型连接</h2>
+            <p class="eyebrow">Step 6</p>
+            <h2>模型连接与发布节奏</h2>
           </div>
-          <span class="panel-tag">AI</span>
+          <span class="panel-tag">Runtime</span>
         </div>
 
+        <p class="section-caption">模型连接</p>
         <div class="field-grid">
           <div class="form-group">
             <label for="apiProvider">AI 服务商</label>
@@ -111,31 +252,22 @@
 
           <div class="form-group">
             <label for="apiKey">API Key</label>
-            <input type="password" id="apiKey" placeholder="输入 API Key" />
+            <input type="password" id="apiKey" placeholder="输入 API Key">
             <p class="help-text">仅保存在 Chrome 本地扩展存储中。</p>
           </div>
 
           <div class="form-group span-2" id="modelGroup">
             <label for="aiModel">模型名称</label>
-            <input type="text" id="aiModel" placeholder="例如：google/gemini-2.5-flash" />
+            <input type="text" id="aiModel" placeholder="例如：google/gemini-2.5-flash">
             <p class="help-text" id="modelHelpText">请填写当前服务商支持的模型 ID。</p>
           </div>
         </div>
-      </section>
 
-      <section class="panel" id="publishing">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">Step 3</p>
-            <h2>发布节奏</h2>
-          </div>
-          <span class="panel-tag">Schedule</span>
-        </div>
-
+        <p class="section-caption">发布节奏</p>
         <div class="field-grid compact">
           <div class="form-group">
             <label for="postsPerDay">每日最大发推数</label>
-            <input type="number" id="postsPerDay" min="1" max="50" value="10" />
+            <input type="number" id="postsPerDay" min="1" max="50" value="10">
             <p class="help-text">达到上限后自动顺延至次日。</p>
           </div>
 
@@ -150,13 +282,13 @@
 
           <div class="form-group" id="smartSlotsGroup">
             <label for="smartTimeSlots">发推时段</label>
-            <input type="text" id="smartTimeSlots" value="8-10,12-14,19-23" placeholder="8-10,12-14,19-23" />
+            <input type="text" id="smartTimeSlots" value="8-10,12-14,19-23" placeholder="8-10,12-14,19-23">
             <p class="help-text">24 小时制，多个时段用逗号分隔。</p>
           </div>
 
           <div class="form-group" id="intervalGroup">
             <label for="postInterval">发推间隔（分钟）</label>
-            <input type="number" id="postInterval" min="15" max="1440" value="30" />
+            <input type="number" id="postInterval" min="15" max="1440" value="30">
             <p class="help-text">从上一条成功发布后开始计算。</p>
           </div>
         </div>
@@ -165,15 +297,16 @@
       <section class="panel" id="diagnostics">
         <div class="panel-head">
           <div>
-            <p class="eyebrow">Step 4</p>
-            <h2>发帖链路测试</h2>
+            <p class="eyebrow">Step 7</p>
+            <h2>测试、复盘与智能分析</h2>
           </div>
           <span class="panel-tag warning">Live</span>
         </div>
 
-        <div class="form-group">
-          <label for="testPostText">中文测试推文</label>
-          <textarea id="testPostText" rows="7">AI副业别先找工具。
+        <div class="field-grid">
+          <div class="form-group">
+            <label for="testPostText">中文测试推文</label>
+            <textarea id="testPostText" rows="8">AI副业别先找工具。
 
 先找需求：
 谁在海外平台付费？
@@ -181,34 +314,13 @@
 你能不能用AI把交付成本压低？
 
 工具不值钱，能交付结果才值钱。</textarea>
-          <p class="help-text">不依赖 API Key，用来验证登录态、中文预填、文本校验和发送按钮状态。</p>
-        </div>
-        <button id="testPostBtn" class="btn-secondary" type="button">启动测试发帖</button>
-      </section>
-
-      <section class="panel" id="intelligence">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">Agent Memory</p>
-            <h2>智能分析结果</h2>
-          </div>
-          <span class="panel-tag">Editable</span>
-        </div>
-
-        <div class="field-grid">
-          <div class="form-group">
-            <label for="aiTargetUsers">目标用户群体</label>
-            <textarea id="aiTargetUsers" rows="3" placeholder="等待 AI 分析，或手动填写..."></textarea>
+            <p class="help-text">不依赖 API Key，用来验证登录态、中文预填、文本校验和发送按钮状态。</p>
+            <button id="testPostBtn" class="btn-secondary" type="button">启动测试发帖</button>
           </div>
 
           <div class="form-group">
-            <label for="aiGoals">发文及引流核心目标</label>
-            <textarea id="aiGoals" rows="3" placeholder="等待 AI 分析，或手动填写..."></textarea>
-          </div>
-
-          <div class="form-group span-2">
-            <label for="aiCharacteristics">发文特征与人设语气</label>
-            <textarea id="aiCharacteristics" rows="4" placeholder="等待 AI 分析，或手动填写..."></textarea>
+            <label for="weeklyReviewSignals">每周复盘指标</label>
+            <textarea id="weeklyReviewSignals" rows="8" placeholder="哪些帖子涨粉、哪些评论带来回复、哪些选题收藏高、哪些表达引发误解。"></textarea>
           </div>
 
           <div class="form-group span-2">
@@ -220,7 +332,7 @@
 
       <div class="sticky-actions">
         <span id="statusMessage" class="status-msg"></span>
-        <button id="saveBtnMirror" class="btn-primary" type="button">保存策略</button>
+        <button id="saveBtnMirror" class="btn-primary" type="button">保存记忆</button>
       </div>
     </main>
   </div>

@@ -1,6 +1,76 @@
 // background.js
 
 const MAX_LOGS = 50;
+const DEFAULT_AGENT_MEMORY = {
+  identity: '',
+  marketPosition: '',
+  audienceSegments: '',
+  audiencePains: '',
+  contentPillars: '',
+  contentAngles: '',
+  proofAssets: '',
+  personalStories: '',
+  coreOpinions: '',
+  boundaries: '',
+  voiceRules: '',
+  bannedClaims: '',
+  interactionTargets: '',
+  replyStrategy: '',
+  sourceInputs: '',
+  weeklyReviewSignals: ''
+};
+
+const AGENT_MEMORY_LABELS = {
+  identity: '身份与可信理由',
+  marketPosition: '差异化定位',
+  audienceSegments: '读者分层',
+  audiencePains: '读者痛点',
+  contentPillars: '内容支柱',
+  contentAngles: '选题角度',
+  proofAssets: '背书与成果资产',
+  personalStories: '个人故事与案例',
+  coreOpinions: '核心观点',
+  boundaries: '表达边界',
+  voiceRules: '表达规则',
+  bannedClaims: '禁用话术',
+  interactionTargets: '优先互动对象',
+  replyStrategy: '评论引流策略',
+  sourceInputs: '日常输入来源',
+  weeklyReviewSignals: '复盘指标'
+};
+
+function normalizeAgentMemory(memory = {}) {
+  return { ...DEFAULT_AGENT_MEMORY, ...(memory || {}) };
+}
+
+function memoryValueToText(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).join('\n');
+  if (value && typeof value === 'object') return JSON.stringify(value);
+  return value ? String(value) : '';
+}
+
+function mergeAgentMemory(base = {}, incoming = {}) {
+  const merged = normalizeAgentMemory(base);
+  Object.keys(DEFAULT_AGENT_MEMORY).forEach((key) => {
+    const value = memoryValueToText(incoming?.[key]).trim();
+    if (value) {
+      merged[key] = value;
+    }
+  });
+  return merged;
+}
+
+function formatAgentMemory(memory = {}) {
+  const normalized = normalizeAgentMemory(memory);
+  const sections = Object.entries(AGENT_MEMORY_LABELS)
+    .map(([key, label]) => {
+      const value = memoryValueToText(normalized[key]).trim();
+      return value ? `【${label}】\n${value}` : '';
+    })
+    .filter(Boolean);
+
+  return sections.length > 0 ? sections.join('\n\n') : '暂无长期记忆。';
+}
 
 function addLog(level, message) {
   const entry = {
@@ -31,6 +101,7 @@ chrome.runtime.onInstalled.addListener(() => {
         targetUsers: '',
         promptTemplate: '你是一个社交媒体引流专家。请根据推文内容，给出一段简短、神回复级别的评论（不超过 40 个字）。\n如果合适的话，请巧妙、自然地顺带提及我的【引流信息】，千万不要显得像生硬的广告，要像朋友间的随口分享：\n\n【推文】：{tweet}\n【引流信息】：{leadTarget}\n\n回复：',
         leadTarget: '',
+        agentMemory: DEFAULT_AGENT_MEMORY,
         postInterval: 30,
         replyInterval: 30
       });
@@ -555,17 +626,14 @@ function handlePostCompleted(source) {
 
 async function generateAIResponse(tweetContent) {
   return new Promise((resolve, reject) => {
-    chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'promptTemplate', 'leadTarget', 'aiPersona'], async (config) => {
+    chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'promptTemplate', 'leadTarget', 'aiPersona', 'agentMemory'], async (config) => {
       const errors = getConfigErrors(config);
       if (errors.length > 0) {
         addLog('warn', `配置不完整，无法生成回复：${errors.join('、')}`);
         return reject(new Error(errors.join('；')));
       }
       
-      let personaContext = "";
-      if (config.aiPersona) {
-         personaContext = `\n【你的账号人设与特征】：${config.aiPersona.characteristics}\n【你的核心引流目标】：${config.aiPersona.goals || config.leadTarget}\n请严格符合上述人设语气进行回复。\n`;
-      }
+      const personaContext = `\n【你的账号人设与特征】：${config.aiPersona?.characteristics || '未填写'}\n【你的核心引流目标】：${config.aiPersona?.goals || config.leadTarget}\n【你的长期记忆】\n${formatAgentMemory(config.agentMemory)}\n请严格符合上述人设、观点边界和互动策略进行回复。\n`;
       
       const prompt = config.promptTemplate
         .replace('{tweet}', tweetContent)
@@ -584,7 +652,7 @@ async function generateAIResponse(tweetContent) {
 }
 
 async function analyzeAccountPersona(bio) {
-  chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget'], async (config) => {
+  chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget', 'agentMemory'], async (config) => {
     const errors = getAIConnectionErrors(config);
     if (errors.length > 0) {
       addLog('warn', `配置不完整，无法分析账号画像：${errors.join('、')}`);
@@ -593,17 +661,38 @@ async function analyzeAccountPersona(bio) {
     }
     addLog('info', '开始 AI 账号画像分析...');
     
-    const prompt = `请分析以下 Twitter 账号简介：【${bio}】。
-请基于该简介，推断并输出该账号的：
-1. 目标用户群体 (targetUsers)
-2. 发文特征与人设语气 (characteristics)
-3. 发文及引流核心目标 (goals)
+    const prompt = `请把以下 X/Twitter 账号简介，重构成一个“个人发声 Agent 的长期记忆”。
+
+账号简介：
+${bio || '暂无'}
+
+产品目标用户是：想在 X 上建立影响力的创始人、独立开发者、出海从业者、AI 工具人、投资/研究人员；以及有想法但输出不稳定、会刷 X 但不会把输入转化为观点和内容、强烈想做 KOL 的人。
+
+请基于账号简介推断，但不要编造具体履历、收益、身份头衔或不可验证案例。输出要可直接填入设置页。
 
 不要包含任何多余文字，严格以如下 JSON 对象格式返回：
 {
   "targetUsers": "...",
   "characteristics": "...",
-  "goals": "..."
+  "goals": "...",
+  "memory": {
+    "identity": "...",
+    "marketPosition": "...",
+    "audienceSegments": "...",
+    "audiencePains": "...",
+    "contentPillars": "...",
+    "contentAngles": "...",
+    "proofAssets": "...",
+    "personalStories": "...",
+    "coreOpinions": "...",
+    "boundaries": "...",
+    "voiceRules": "...",
+    "bannedClaims": "...",
+    "interactionTargets": "...",
+    "replyStrategy": "...",
+    "sourceInputs": "...",
+    "weeklyReviewSignals": "..."
+  }
 }`;
     
     chrome.storage.local.set({ isAnalyzingPersona: true });
@@ -611,11 +700,17 @@ async function analyzeAccountPersona(bio) {
       const generatedText = await callLLM(prompt, config, true);
       // Clean up markdown code blocks if the model wrapped it
       const cleanJsonStr = generatedText.replace(/```json/g, '').replace(/```/g, '').trim();
-      const persona = JSON.parse(cleanJsonStr);
+      const parsed = JSON.parse(cleanJsonStr);
+      const persona = {
+        targetUsers: parsed.targetUsers || '',
+        characteristics: parsed.characteristics || '',
+        goals: parsed.goals || ''
+      };
+      const agentMemory = mergeAgentMemory(config.agentMemory, parsed.memory || parsed.agentMemory || {});
       
-      chrome.storage.local.set({ aiPersona: persona, isAnalyzingPersona: false }, () => {
+      chrome.storage.local.set({ aiPersona: persona, agentMemory, isAnalyzingPersona: false }, () => {
          addLog('success', '账号画像分析完成');
-         analyzeCompetitors(persona);
+         analyzeCompetitors(persona, agentMemory);
       });
     } catch (e) {
       addLog('error', `账号画像分析失败: ${e.message}`);
@@ -624,8 +719,8 @@ async function analyzeAccountPersona(bio) {
   });
 }
 
-async function analyzeCompetitors(persona) {
-  chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget'], async (config) => {
+async function analyzeCompetitors(persona, agentMemoryOverride) {
+  chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget', 'agentMemory'], async (config) => {
     const errors = getAIConnectionErrors(config);
     if (errors.length > 0) {
       addLog('warn', `配置不完整，无法分析竞品：${errors.join('、')}`);
@@ -638,6 +733,8 @@ async function analyzeCompetitors(persona) {
 - 目标用户：${persona.targetUsers}
 - 发文特征：${persona.characteristics}
 - 核心目标：${persona.goals}
+- 长期记忆：
+${formatAgentMemory(agentMemoryOverride || config.agentMemory)}
 
 作为顶级社交媒体运营专家，请生成一份详尽的《竞品对标与低粉爆款运营拆解报告》。
 报告内容必须包括：
@@ -668,7 +765,7 @@ async function analyzeCompetitors(persona) {
 }
 
 async function generateAutoDrafts() {
-  chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget', 'isRunning', 'tweetQueue', 'isGenerating', 'aiPersona', 'accountBio', 'competitorReport'], async (config) => {
+  chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget', 'isRunning', 'tweetQueue', 'isGenerating', 'aiPersona', 'agentMemory', 'accountBio', 'competitorReport'], async (config) => {
     const errors = getConfigErrors(config);
     const isPersonaEmpty = !config.aiPersona || (!config.aiPersona.targetUsers && !config.aiPersona.characteristics && !config.aiPersona.goals);
     if (!config.isRunning || errors.length > 0 || config.isGenerating || isPersonaEmpty) {
@@ -685,6 +782,7 @@ async function generateAutoDrafts() {
     chrome.runtime.sendMessage({ action: "generationStatus", status: true }).catch(() => {});
     
     const persona = config.aiPersona;
+    const memoryContext = formatAgentMemory(config.agentMemory);
     const reportContext = config.competitorReport ? `\n另外，系统已经为您拆解了竞品和低粉爆款的套路，请【严格应用】以下套路来撰写推文：\n${config.competitorReport}\n` : "";
     
     const prompt = `你是这个 Twitter 账号的运营者。账号简介：【${config.accountBio}】。
@@ -692,6 +790,9 @@ async function generateAutoDrafts() {
 - 目标用户：${persona.targetUsers}
 - 发文特征与语气：${persona.characteristics}
 - 核心发文目标：${persona.goals}
+
+以下是这个账号的长期记忆，必须优先遵守：
+${memoryContext}
 ${reportContext}
 请你完全接管内容创作，直接为我生成 20 条极具网感的高质量推文（可以包含适当的emoji，高度符合上述的人设和业务目标）。
 必须采用上述“低粉爆款”的钩子（Hook）套路和内容框架！

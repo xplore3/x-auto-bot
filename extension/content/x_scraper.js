@@ -207,7 +207,7 @@ function ensureBioExtracted(options = {}) {
           } else {
             addLog('warn', '在 Profile 页面等待简介超时，未读取到简介');
             chrome.storage.local.set({ accountBio: '', profileReadRequested: false });
-            setProfileProgress('failed', '简介读取失败，可在策略中心手动填写人设', 0);
+            setProfileProgress('failed', '简介读取失败，可在长期记忆中心手动填写人设', 0);
           }
           clearInterval(checkInterval);
         }
@@ -471,7 +471,7 @@ function renderWidget() {
     focusStatus = '正在生成内容草稿';
     statusClass = 'active';
   } else if (profileFailed && isPersonaEmpty) {
-    focusStatus = '简介读取失败：请在策略中心手动填写人设';
+    focusStatus = '简介读取失败：请在长期记忆中心手动填写人设';
     statusClass = 'warn';
   } else if (strategyGaps.length > 0) {
     focusStatus = `待补齐：${strategyGaps.join('、')}`;

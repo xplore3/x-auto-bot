@@ -15,6 +15,44 @@ const DEFAULT_TEST_POST = `AI副业别先找工具。
 
 工具不值钱，能交付结果才值钱。`;
 
+const DEFAULT_AGENT_MEMORY = {
+  identity: '',
+  marketPosition: '',
+  audienceSegments: '',
+  audiencePains: '',
+  contentPillars: '',
+  contentAngles: '',
+  proofAssets: '',
+  personalStories: '',
+  coreOpinions: '',
+  boundaries: '',
+  voiceRules: '',
+  bannedClaims: '',
+  interactionTargets: '',
+  replyStrategy: '',
+  sourceInputs: '',
+  weeklyReviewSignals: ''
+};
+
+const AGENT_MEMORY_FIELD_IDS = {
+  identity: 'memoryIdentity',
+  marketPosition: 'marketPosition',
+  audienceSegments: 'audienceSegments',
+  audiencePains: 'audiencePains',
+  contentPillars: 'contentPillars',
+  contentAngles: 'contentAngles',
+  proofAssets: 'proofAssets',
+  personalStories: 'personalStories',
+  coreOpinions: 'coreOpinions',
+  boundaries: 'boundaries',
+  voiceRules: 'voiceRules',
+  bannedClaims: 'bannedClaims',
+  interactionTargets: 'interactionTargets',
+  replyStrategy: 'replyStrategy',
+  sourceInputs: 'sourceInputs',
+  weeklyReviewSignals: 'weeklyReviewSignals'
+};
+
 const PROVIDER_DEFAULTS = {
   gemini: { model: 'gemini-2.5-flash', showModel: false },
   openrouter: { model: 'google/gemini-2.5-flash', showModel: true },
@@ -86,6 +124,7 @@ function saveOptions(options = {}, afterSave) {
   const aiGoals = document.getElementById('aiGoals').value;
   const competitorReport = document.getElementById('competitorReport').value;
   const testPostText = document.getElementById('testPostText').value.trim();
+  const agentMemory = getAgentMemoryFromForm();
 
   // 基础配置校验
   const missing = [];
@@ -95,7 +134,7 @@ function saveOptions(options = {}, afterSave) {
   if (!silent && missing.length > 0) {
     showStatus(`⚠️ 保存成功，但缺少关键配置：${missing.join('、')}，机器人可能无法正常运行。`, '#f5a623', 5000);
   } else if (!silent) {
-    showStatus('✅ 配置已成功保存！');
+    showStatus('✅ 长期记忆已保存！');
   }
 
   chrome.storage.local.get(['aiPersona'], (result) => {
@@ -116,13 +155,14 @@ function saveOptions(options = {}, afterSave) {
       smartTimeSlots,
       postInterval,
       aiPersona: persona,
+      agentMemory,
       competitorReport,
       testPostText
     }, () => {
       chrome.runtime.sendMessage({ action: 'queueUpdated' }, () => {});
       chrome.runtime.sendMessage({ action: 'maybeStartAgentAfterSetup' }, (response) => {
         if (!silent && response?.started) {
-          showStatus('✅ 策略已保存，Agent 已自动启动。', '#17bf63', 5000);
+          showStatus('✅ 长期记忆已保存，Agent 已自动启动。', '#17bf63', 5000);
         }
       });
       if (typeof afterSave === 'function') afterSave();
@@ -169,14 +209,46 @@ function setValueIfNotFocused(id, value) {
   el.value = value || '';
 }
 
+function normalizeAgentMemory(memory = {}) {
+  return { ...DEFAULT_AGENT_MEMORY, ...(memory || {}) };
+}
+
+function memoryValueToText(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).join('\n');
+  if (value && typeof value === 'object') return JSON.stringify(value);
+  return value ? String(value) : '';
+}
+
+function getAgentMemoryFromForm() {
+  const memory = {};
+  Object.entries(AGENT_MEMORY_FIELD_IDS).forEach(([key, id]) => {
+    memory[key] = document.getElementById(id)?.value || '';
+  });
+  return memory;
+}
+
+function fillAgentMemory(memory = {}, preserveFocus = false) {
+  const normalized = normalizeAgentMemory(memory);
+  Object.entries(AGENT_MEMORY_FIELD_IDS).forEach(([key, id]) => {
+    const value = memoryValueToText(normalized[key]);
+    if (preserveFocus) {
+      setValueIfNotFocused(id, value);
+      return;
+    }
+
+    const el = document.getElementById(id);
+    if (el) el.value = value;
+  });
+}
+
 function updateSetupStatusFromStorage(items) {
   const progress = items.profileReadProgress || {};
   if (items.isAnalyzingCompetitors) {
     setSetupStatus('账号画像已生成，正在分析竞品和爆款框架...', 'running');
   } else if (items.isAnalyzingPersona) {
-    setSetupStatus('已读取 X 账号，正在用 AI 生成人设和目标用户...', 'running');
+    setSetupStatus('已读取 X 账号，正在用 AI 生成长期记忆...', 'running');
   } else if (items.isGenerating) {
-    setSetupStatus('策略已生成，正在准备内容草稿...', 'running');
+    setSetupStatus('长期记忆已生成，正在准备内容草稿...', 'running');
   } else if (progress.stage === 'failed') {
     setSetupStatus(progress.message || '读取失败，请确认 X 已登录后重试。', 'error');
   } else if (items.competitorReport) {
@@ -223,6 +295,7 @@ function restoreOptions() {
     smartTimeSlots: '8-10,12-14,19-23',
     postInterval: 30,
     aiPersona: { targetUsers: '', characteristics: '', goals: '' },
+    agentMemory: DEFAULT_AGENT_MEMORY,
     competitorReport: '',
     testPostText: DEFAULT_TEST_POST,
     accountBio: '',
@@ -252,6 +325,7 @@ function restoreOptions() {
     document.getElementById('aiTargetUsers').value = items.aiPersona.targetUsers || '';
     document.getElementById('aiCharacteristics').value = items.aiPersona.characteristics || '';
     document.getElementById('aiGoals').value = items.aiPersona.goals || '';
+    fillAgentMemory(items.agentMemory);
     document.getElementById('competitorReport').value = items.competitorReport || '';
     document.getElementById('testPostText').value = items.testPostText || DEFAULT_TEST_POST;
     updateSetupStatusFromStorage(items);
@@ -269,6 +343,9 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   }
   if (changes.competitorReport) {
     setValueIfNotFocused('competitorReport', changes.competitorReport.newValue || '');
+  }
+  if (changes.agentMemory) {
+    fillAgentMemory(changes.agentMemory.newValue || {}, true);
   }
 
   chrome.storage.local.get([
