@@ -318,19 +318,19 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 
 // 高频检查，确保 SPA 路由切换后 widget 能快速恢复
 setInterval(() => {
-  if (botState.isRunning) ensureWidget();
-}, 200);
+  ensureWidget();
+}, 1000);
 
 // 每秒刷新 widget 内容（时间、状态、倒计时等）
 setInterval(() => {
-  if (botState.isRunning) renderWidget();
+  renderWidget();
 }, 1000);
 
 function ensureWidget() {
   if (!chrome.runtime?.id) return;
   let widget = document.getElementById('x-auto-bot-widget');
   if (!botState.isRunning) {
-    if (widget) widget.classList.add('hidden');
+    if (!widget) renderWidget();
     return;
   }
   if (!widget) {
@@ -362,40 +362,16 @@ function getWidgetConfigErrors(state) {
   return errors;
 }
 
-function createLogItem(log) {
-  const div = document.createElement('div');
-  div.className = 'x-bot-log-item';
-  div.dataset.time = String(log.time);
-  const time = formatLogTime(log.time);
-  const level = log.level || 'info';
-  const emoji = getLevelEmoji(level);
-  div.innerHTML = `
-    <span class="x-bot-log-time">${time}</span>
-    <span class="x-bot-log-level">${emoji}</span>
-    <span class="x-bot-log-msg ${level}">${escapeHtml(log.message)}</span>
-  `;
-  return div;
-}
-
 function renderWidget() {
   if (!chrome.runtime?.id) return;
   
   let widget = document.getElementById('x-auto-bot-widget');
-  const isFirstRender = !widget;
-  
-  if (!botState.isRunning) {
-    if (widget) widget.classList.add('hidden');
-    return;
-  }
-  
   if (!widget) {
     widget = document.createElement('div');
     widget.id = 'x-auto-bot-widget';
     (document.body || document.documentElement).appendChild(widget);
   }
-  widget.classList.remove('hidden');
 
-  // 配置错误检测
   const configErrors = botState.configErrors && botState.configErrors.length > 0 
     ? botState.configErrors 
     : getWidgetConfigErrors(botState);
@@ -410,511 +386,397 @@ function renderWidget() {
   const apiCooldownSecs = botState.apiCooldownUntil && botState.apiCooldownUntil > now
     ? Math.ceil((botState.apiCooldownUntil - now) / 1000) : 0;
   
-  // Determine absolute focus status
-  let focusStatus = "";
-  let isError = false;
-  
-  if (botState.isTyping) {
-    focusStatus = "⌨️ 正在模拟敲击发送回复...";
+  let focusStatus = '';
+  let statusClass = 'idle';
+
+  if (!botState.isRunning) {
+    focusStatus = configErrors.length > 0 ? `待配置：${configErrors.join('、')}` : '待启动：点击扩展按钮启动 Agent';
+    statusClass = configErrors.length > 0 ? 'warn' : 'idle';
+  } else if (botState.isAutoPaused) {
+    focusStatus = botState.pauseReason || '已暂停，等待人工检查';
+    statusClass = 'error';
+  } else if (botState.isTyping) {
+    focusStatus = '正在处理发布或回复动作';
+    statusClass = 'active';
   } else if (botState.isGeneratingReply) {
-    focusStatus = "💬 正在构思高转化神回复...";
+    focusStatus = '正在生成互动回复';
+    statusClass = 'active';
   } else if (apiCooldownSecs > 0) {
-    focusStatus = `⚠️ AI 接口额度受限，触发接口保护 (${apiCooldownSecs}s)...`;
-    isError = true;
+    focusStatus = `AI 接口保护中，${apiCooldownSecs}s 后重试`;
+    statusClass = 'warn';
   } else if (twitterCooldownSecs > 0) {
-    focusStatus = `🛡️ 评论成功！防封号静默中 (${twitterCooldownSecs}s)...`;
+    focusStatus = `互动冷却中，${twitterCooldownSecs}s 后继续`;
+    statusClass = 'active';
   } else if (botState.isAnalyzingPersona) {
-    focusStatus = "🧠 正在深度分析账号画像...";
+    focusStatus = '正在分析账号画像';
+    statusClass = 'active';
   } else if (botState.isAnalyzingCompetitors) {
-    focusStatus = "📊 正在检索对标竞品框架...";
+    focusStatus = '正在整理竞品和爆款框架';
+    statusClass = 'active';
   } else if (botState.isGenerating) {
-    focusStatus = "✍️ 正在批量创作推文草稿...";
+    focusStatus = '正在生成内容草稿';
+    statusClass = 'active';
   } else if (isPersonaEmpty || !botState.competitorReport) {
-    focusStatus = "🏗️ 大脑构建中，暂停行动等待基建完成...";
+    focusStatus = '策略基建未完成，暂不执行互动';
+    statusClass = 'warn';
   } else {
-    focusStatus = "👀 正在模拟真人浏览时间线...";
+    focusStatus = '运行中：正在观察时间线和排期';
+    statusClass = 'active';
   }
 
-  // Determine milestone statuses
-  const m1 = botState.accountBio ? '<span class="x-bot-icon">✅</span>' : '<span class="x-bot-icon">⏳</span>';
-  const m2 = !isPersonaEmpty ? '<span class="x-bot-icon">✅</span>' : '<span class="x-bot-icon">⏳</span>';
-  const m3 = botState.competitorReport ? '<span class="x-bot-icon">✅</span>' : '<span class="x-bot-icon">⏳</span>';
-  const m4 = qLen >= 5 ? '<span class="x-bot-icon">✅</span>' : '<span class="x-bot-icon">⏳</span>';
-  
   const repliesSent = botState.stats ? botState.stats.repliesSent : 0;
-  
   const timeStr = new Date().toLocaleTimeString('en-US', { hour12: false });
-  const nextPostStr = botState.nextPostTime ? botState.nextPostTime : "待计算";
+  const nextPostStr = botState.nextPostTime ? botState.nextPostTime : '待计算';
 
-  // Profile Progress
   const progress = botState.profileReadProgress || { stage: 'idle', percent: 0, message: '等待启动...' };
   const showProgress = !botState.accountBio && botState.isRunning;
   const progressClass = progress.stage === 'extracted' ? 'done' : (progress.stage === 'failed' ? 'error' : '');
 
-  // Logs - 正序：最早在前，最新在后
   const logs = botState.logs || [];
   const recentLogs = logs.slice(-12);
-
-  if (isFirstRender) {
-    // 首次渲染：生成完整 HTML
-    widget.innerHTML = `
-      <style>
-        #x-auto-bot-widget {
-          position: fixed;
-          bottom: 20px;
-          right: 20px;
-          width: 340px;
-          background: #0f1419;
-          border: 1px solid #2f3336;
-          border-radius: 12px;
-          box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-          z-index: 99999;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-          font-size: 13px;
-          color: #e7e9ea;
-          overflow: hidden;
-        }
-        #x-auto-bot-widget.hidden { display: none !important; }
-        .x-bot-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 12px 16px;
-          border-bottom: 1px solid #2f3336;
-          background: rgba(29, 161, 242, 0.08);
-        }
-        .x-bot-header-left {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-weight: 600;
-        }
-        .x-bot-pulse {
-          width: 8px;
-          height: 8px;
-          background: #00BA7C;
-          border-radius: 50%;
-          animation: x-bot-pulse 2s infinite;
-        }
-        @keyframes x-bot-pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
-        }
-        .x-bot-header-time {
-          font-family: monospace;
-          font-size: 12px;
-          color: #8899a6;
-        }
-        .x-bot-status-panel {
-          padding: 12px 16px;
-          border-bottom: 1px solid #2f3336;
-        }
-        .x-bot-status-label {
-          font-size: 11px;
-          color: #8899a6;
-          margin-bottom: 4px;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-        }
-        .x-bot-status-text {
-          font-weight: 500;
-        }
-        .x-bot-config-alert {
-          padding: 12px 16px;
-          background: rgba(255, 77, 79, 0.08);
-          border-left: 3px solid #ff4d4f;
-        }
-        .x-bot-config-alert-title {
-          font-weight: 600;
-          color: #ff4d4f;
-          margin-bottom: 4px;
-        }
-        .x-bot-config-alert-items {
-          font-size: 12px;
-          color: rgba(255, 77, 79, 0.8);
-        }
-        .x-bot-config-alert-hint {
-          font-size: 11px;
-          color: #8899a6;
-          margin-top: 6px;
-        }
-        .x-bot-progress-panel {
-          padding: 12px 16px;
-          border-bottom: 1px solid #2f3336;
-        }
-        .x-bot-progress-header {
-          display: flex;
-          justify-content: space-between;
-          margin-bottom: 8px;
-        }
-        .x-bot-progress-title {
-          font-size: 12px;
-          color: #8899a6;
-        }
-        .x-bot-progress-percent {
-          font-family: monospace;
-          font-size: 12px;
-          color: #1DA1F2;
-        }
-        .x-bot-progress-bar-bg {
-          height: 4px;
-          background: #2f3336;
-          border-radius: 2px;
-          overflow: hidden;
-        }
-        .x-bot-progress-bar-fill {
-          height: 100%;
-          background: #1DA1F2;
-          border-radius: 2px;
-          transition: width 0.3s;
-        }
-        .x-bot-progress-msg {
-          font-size: 11px;
-          margin-top: 6px;
-        }
-        .x-bot-progress-msg.done { color: #00BA7C; }
-        .x-bot-progress-msg.error { color: #ff4d4f; }
-        .x-bot-milestones {
-          padding: 10px 16px;
-          border-bottom: 1px solid #2f3336;
-        }
-        .x-bot-milestone {
-          font-size: 12px;
-          padding: 4px 0;
-          color: rgba(255,255,255,0.6);
-        }
-        .x-bot-milestone.done { color: #00BA7C; }
-        .x-bot-icon { display: inline-block; width: 20px; }
-        .x-bot-next-post {
-          padding: 10px 16px;
-          font-size: 12px;
-          color: #8899a6;
-          border-bottom: 1px solid #2f3336;
-        }
-        .x-bot-log-panel {
-          border-top: 1px solid #2f3336;
-        }
-        .x-bot-log-toggle {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 10px 16px;
-          cursor: pointer;
-          font-size: 12px;
-          color: #8899a6;
-          user-select: none;
-        }
-        .x-bot-log-toggle:hover {
-          background: rgba(255,255,255,0.02);
-        }
-        .x-bot-log-toggle-icon {
-          font-size: 10px;
-          transition: transform 0.2s;
-        }
-        .x-bot-log-toggle-icon.open {
-          transform: rotate(90deg);
-        }
-        .x-bot-log-list {
-          max-height: 0;
-          overflow-y: auto;
-          transition: max-height 0.3s;
-          overscroll-behavior: contain;
-        }
-        .x-bot-log-list.open {
-          max-height: 240px;
-        }
-        .x-bot-log-list::-webkit-scrollbar {
-          width: 4px;
-        }
-        .x-bot-log-list::-webkit-scrollbar-thumb {
-          background: #38444d;
-          border-radius: 2px;
-        }
-        .x-bot-log-item {
-          padding: 6px 16px;
-          font-size: 12px;
-          border-bottom: 1px solid rgba(255,255,255,0.03);
-          display: flex;
-          gap: 6px;
-          align-items: flex-start;
-        }
-        .x-bot-log-time {
-          font-family: monospace;
-          color: #8899a6;
-          white-space: nowrap;
-          font-size: 11px;
-        }
-        .x-bot-log-level {
-          font-size: 11px;
-        }
-        .x-bot-log-msg {
-          flex: 1;
-          word-break: break-word;
-          line-height: 1.4;
-        }
-        .x-bot-log-msg.info { color: rgba(255,255,255,0.75); }
-        .x-bot-log-msg.success { color: #00BA7C; }
-        .x-bot-log-msg.warn { color: #f5a623; }
-        .x-bot-log-msg.error { color: #ff4d4f; }
-        .x-bot-pause-panel {
-          padding: 12px 16px;
-          background: rgba(255, 77, 79, 0.12);
-          border-left: 3px solid #ff4d4f;
-        }
-        .x-bot-pause-title {
-          font-weight: 600;
-          color: #ff4d4f;
-          margin-bottom: 6px;
-        }
-        .x-bot-pause-reason {
-          font-size: 12px;
-          color: rgba(255, 255, 255, 0.8);
-          margin-bottom: 10px;
-        }
-        .x-bot-resume-btn {
-          background: #ff4d4f;
-          color: #fff;
-          border: none;
-          padding: 6px 14px;
-          border-radius: 6px;
-          font-size: 12px;
-          font-weight: 600;
-          cursor: pointer;
-        }
-        .x-bot-resume-btn:hover {
-          background: #ff7875;
-        }
-      </style>
-      <div class="x-bot-header">
-        <div class="x-bot-header-left">
-          <div class="x-bot-pulse"></div>
-          <span>X-Auto 指挥枢纽</span>
+  const logRows = recentLogs.length === 0
+    ? '<div class="x-bot-log-item"><span class="x-bot-log-msg info">暂无日志...</span></div>'
+    : recentLogs.map(log => `
+        <div class="x-bot-log-item" data-time="${log.time}">
+          <span class="x-bot-log-time">${formatLogTime(log.time)}</span>
+          <span class="x-bot-log-level">${getLevelEmoji(log.level || 'info')}</span>
+          <span class="x-bot-log-msg ${log.level || 'info'}">${escapeHtml(log.message || '')}</span>
         </div>
-        <div class="x-bot-header-time">${timeStr}</div>
+      `).join('');
+
+  const milestone = (done, label, meta = '') => `
+    <div class="x-bot-milestone ${done ? 'done' : ''}">
+      <span class="x-bot-dot"></span>
+      <span>${label}${meta ? ` <em>${meta}</em>` : ''}</span>
+    </div>
+  `;
+
+  widget.innerHTML = `
+    <style>
+      #x-auto-bot-widget {
+        position: fixed;
+        right: 20px;
+        bottom: 20px;
+        width: 340px;
+        background: #ffffff;
+        border: 1px solid #dce3ea;
+        border-radius: 10px;
+        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.24);
+        z-index: 99999;
+        color: #17212b;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 13px;
+        overflow: hidden;
+      }
+      .x-bot-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 13px 14px;
+        background: #111923;
+        color: #f8fafc;
+      }
+      .x-bot-title {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-weight: 800;
+      }
+      .x-bot-status-dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        background: #94a3b8;
+      }
+      .x-bot-status-dot.active { background: #0f9f6e; box-shadow: 0 0 0 4px rgba(15,159,110,0.18); }
+      .x-bot-status-dot.warn { background: #b7791f; }
+      .x-bot-status-dot.error { background: #d64545; }
+      .x-bot-time {
+        color: #9aa7b5;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+      }
+      .x-bot-status-panel,
+      .x-bot-progress-panel,
+      .x-bot-milestones,
+      .x-bot-next-post,
+      .x-bot-log-toggle {
+        border-bottom: 1px solid #dce3ea;
+      }
+      .x-bot-status-panel {
+        padding: 13px 14px;
+      }
+      .x-bot-status-label,
+      .x-bot-progress-title {
+        color: #65717e;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .x-bot-status-text {
+        margin-top: 5px;
+        color: #17212b;
+        font-weight: 750;
+        line-height: 1.4;
+      }
+      .x-bot-status-text.warn { color: #b7791f; }
+      .x-bot-status-text.error { color: #d64545; }
+      .x-bot-alert,
+      .x-bot-pause-panel {
+        padding: 11px 14px;
+        border-bottom: 1px solid #dce3ea;
+        background: #fff7e8;
+        color: #7c520f;
+      }
+      .x-bot-pause-panel {
+        background: #fff1f1;
+        color: #9f2f2f;
+      }
+      .x-bot-alert-title,
+      .x-bot-pause-title {
+        font-weight: 800;
+        margin-bottom: 4px;
+      }
+      .x-bot-alert-text,
+      .x-bot-pause-reason {
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      .x-bot-resume-btn {
+        margin-top: 9px;
+        min-height: 30px;
+        padding: 0 12px;
+        border: 0;
+        border-radius: 8px;
+        background: #d64545;
+        color: #fff;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 800;
+        cursor: pointer;
+      }
+      .x-bot-progress-panel {
+        padding: 12px 14px;
+      }
+      .x-bot-progress-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+      .x-bot-progress-percent {
+        color: #0f8bd6;
+        font-weight: 800;
+        font-size: 12px;
+      }
+      .x-bot-progress-bar-bg {
+        height: 5px;
+        background: #eef2f5;
+        border-radius: 999px;
+        overflow: hidden;
+      }
+      .x-bot-progress-bar-fill {
+        height: 100%;
+        background: #0f8bd6;
+        border-radius: 999px;
+      }
+      .x-bot-progress-msg {
+        margin-top: 7px;
+        color: #65717e;
+        font-size: 12px;
+      }
+      .x-bot-milestones {
+        display: grid;
+        gap: 7px;
+        padding: 12px 14px;
+      }
+      .x-bot-milestone {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #65717e;
+        font-size: 12px;
+      }
+      .x-bot-milestone.done {
+        color: #17212b;
+      }
+      .x-bot-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: #cfd8e3;
+      }
+      .x-bot-milestone.done .x-bot-dot {
+        background: #0f9f6e;
+      }
+      .x-bot-milestone em {
+        color: #0f8bd6;
+        font-style: normal;
+        font-weight: 750;
+      }
+      .x-bot-next-post {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1px;
+        background: #dce3ea;
+      }
+      .x-bot-mini-stat {
+        padding: 10px 14px;
+        background: #fff;
+      }
+      .x-bot-mini-stat span {
+        display: block;
+        color: #65717e;
+        font-size: 11px;
+        margin-bottom: 4px;
+      }
+      .x-bot-mini-stat strong {
+        display: block;
+        color: #17212b;
+        font-size: 12px;
+        line-height: 1.3;
+        word-break: break-word;
+      }
+      .x-bot-log-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 14px;
+        color: #65717e;
+        font-size: 12px;
+        font-weight: 800;
+        cursor: pointer;
+        user-select: none;
+      }
+      .x-bot-log-toggle-icon {
+        transition: transform 0.2s;
+      }
+      .x-bot-log-toggle-icon.open {
+        transform: rotate(90deg);
+      }
+      .x-bot-log-list {
+        max-height: 0;
+        overflow-y: auto;
+        transition: max-height 0.2s;
+        overscroll-behavior: contain;
+      }
+      .x-bot-log-list.open {
+        max-height: 220px;
+      }
+      .x-bot-log-item {
+        display: flex;
+        gap: 6px;
+        align-items: flex-start;
+        padding: 7px 14px;
+        border-bottom: 1px solid #eef2f5;
+        font-size: 12px;
+      }
+      .x-bot-log-time {
+        flex: 0 0 auto;
+        color: #65717e;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11px;
+      }
+      .x-bot-log-level {
+        flex: 0 0 auto;
+        font-size: 11px;
+      }
+      .x-bot-log-msg {
+        flex: 1;
+        color: #17212b;
+        line-height: 1.4;
+        word-break: break-word;
+      }
+      .x-bot-log-msg.success { color: #0f9f6e; }
+      .x-bot-log-msg.warn { color: #b7791f; }
+      .x-bot-log-msg.error { color: #d64545; }
+    </style>
+    <div class="x-bot-header">
+      <div class="x-bot-title">
+        <span class="x-bot-status-dot ${statusClass}"></span>
+        <span>Voice Agent</span>
       </div>
-      
-      <div class="x-bot-status-panel">
-        <div class="x-bot-status-label">当前绝对焦点状态</div>
-        <div class="x-bot-status-text" style="color: ${isError ? '#ff4d4f' : '#1DA1F2'}">${focusStatus}</div>
-      </div>
-      
-      ${botState.isAutoPaused ? `
+      <div class="x-bot-time">${timeStr}</div>
+    </div>
+
+    <div class="x-bot-status-panel">
+      <div class="x-bot-status-label">Current Focus</div>
+      <div class="x-bot-status-text ${statusClass}">${escapeHtml(focusStatus)}</div>
+    </div>
+
+    ${botState.isAutoPaused ? `
       <div class="x-bot-pause-panel" id="x-bot-pause-panel">
-        <div class="x-bot-pause-title">🛑 自动操作已暂停</div>
+        <div class="x-bot-pause-title">自动操作已暂停</div>
         <div class="x-bot-pause-reason">${escapeHtml(botState.pauseReason || '操作失败，等待人工干预')}</div>
-        <button class="x-bot-resume-btn" id="x-bot-resume-btn">▶ 继续自动运行</button>
+        <button class="x-bot-resume-btn" id="x-bot-resume-btn">继续运行</button>
       </div>
-      ` : ''}
-      
-      ${configErrors.length > 0 ? `
-      <div class="x-bot-config-alert">
-        <div class="x-bot-config-alert-title">⚠️ 配置不完整</div>
-        <div class="x-bot-config-alert-items">缺少：${configErrors.join('、')}</div>
-        <div class="x-bot-config-alert-hint">请到扩展配置中心补全后再启动</div>
+    ` : ''}
+
+    ${configErrors.length > 0 ? `
+      <div class="x-bot-alert">
+        <div class="x-bot-alert-title">配置未完成</div>
+        <div class="x-bot-alert-text">缺少：${escapeHtml(configErrors.join('、'))}</div>
       </div>
-      ` : ''}
-      
-      ${showProgress ? `
+    ` : ''}
+
+    ${showProgress ? `
       <div class="x-bot-progress-panel">
         <div class="x-bot-progress-header">
-          <span class="x-bot-progress-title">📋 Profile 读取进度</span>
+          <span class="x-bot-progress-title">Profile Readiness</span>
           <span class="x-bot-progress-percent">${progress.percent}%</span>
         </div>
         <div class="x-bot-progress-bar-bg">
           <div class="x-bot-progress-bar-fill" style="width: ${progress.percent}%"></div>
         </div>
-        <div class="x-bot-progress-msg ${progressClass}">${progress.message}</div>
+        <div class="x-bot-progress-msg ${progressClass}">${escapeHtml(progress.message)}</div>
       </div>
-      ` : ''}
-      
-      <div class="x-bot-milestones">
-        <div class="x-bot-milestone ${botState.accountBio ? 'done' : ''}">${m1} 读取主页简介</div>
-        <div class="x-bot-milestone ${!isPersonaEmpty ? 'done' : ''}">${m2} AI 账号画像分析</div>
-        <div class="x-bot-milestone ${botState.competitorReport ? 'done' : ''}">${m3} 提取竞品起号策略</div>
-        <div class="x-bot-milestone ${qLen >= 5 ? 'done' : ''}">${m4} 储备发文草稿 (${qLen}/20)</div>
-        <div class="x-bot-milestone"><span class="x-bot-icon">🚀</span> 今日引流互动 (${repliesSent} 次)</div>
+    ` : ''}
+
+    <div class="x-bot-milestones">
+      ${milestone(Boolean(botState.accountBio), '读取主页简介')}
+      ${milestone(!isPersonaEmpty, '人设与目标用户')}
+      ${milestone(Boolean(botState.competitorReport), '竞品与爆款框架')}
+      ${milestone(qLen >= 5, '内容草稿库存', `${qLen}/20`)}
+    </div>
+
+    <div class="x-bot-next-post">
+      <div class="x-bot-mini-stat">
+        <span>下次发布</span>
+        <strong>${escapeHtml(nextPostStr)}</strong>
       </div>
-      
-      <div class="x-bot-next-post">
-        下一次发推时间: ${nextPostStr}
+      <div class="x-bot-mini-stat">
+        <span>今日互动</span>
+        <strong>${repliesSent} 次</strong>
       </div>
-      
-      <div class="x-bot-log-panel">
-        <div class="x-bot-log-toggle" id="x-bot-log-toggle">
-          <span>📜 运行日志 (${logs.length})</span>
-          <span class="x-bot-log-toggle-icon ${logPanelOpen ? 'open' : ''}">▶</span>
-        </div>
-        <div class="x-bot-log-list ${logPanelOpen ? 'open' : ''}" id="x-bot-log-list">
-        </div>
+    </div>
+
+    <div class="x-bot-log-panel">
+      <div class="x-bot-log-toggle" id="x-bot-log-toggle">
+        <span>行动记录 (${logs.length})</span>
+        <span class="x-bot-log-toggle-icon ${logPanelOpen ? 'open' : ''}">›</span>
       </div>
-    `;
-    
-    // 填充日志列表（首次渲染）
-    const logListEl = widget.querySelector('#x-bot-log-list');
-    if (logListEl) {
-      if (recentLogs.length === 0) {
-        logListEl.innerHTML = '<div class="x-bot-log-item"><span class="x-bot-log-msg info">暂无日志...</span></div>';
-      } else {
-        recentLogs.forEach(log => logListEl.appendChild(createLogItem(log)));
-      }
-    }
-    
-    // 绑定 toggle 事件
-    const toggleBtn = widget.querySelector('#x-bot-log-toggle');
-    if (toggleBtn) {
-      toggleBtn.addEventListener('click', () => {
-        logPanelOpen = !logPanelOpen;
-        const list = widget.querySelector('#x-bot-log-list');
-        if (list) list.classList.toggle('open', logPanelOpen);
-        const icon = widget.querySelector('.x-bot-log-toggle-icon');
-        if (icon) icon.classList.toggle('open', logPanelOpen);
+      <div class="x-bot-log-list ${logPanelOpen ? 'open' : ''}" id="x-bot-log-list">
+        ${logRows}
+      </div>
+    </div>
+  `;
+
+  const toggleBtn = widget.querySelector('#x-bot-log-toggle');
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', () => {
+      logPanelOpen = !logPanelOpen;
+      renderWidget();
+    });
+  }
+
+  const resumeBtn = widget.querySelector('#x-bot-resume-btn');
+  if (resumeBtn) {
+    resumeBtn.addEventListener('click', () => {
+      chrome.storage.local.set({ isAutoPaused: false, pauseReason: '' }, () => {
+        addLog('info', '用户手动恢复自动运行');
       });
-    }
-    
-    // 绑定继续运行按钮
-    const resumeBtn = widget.querySelector('#x-bot-resume-btn');
-    if (resumeBtn) {
-      resumeBtn.addEventListener('click', () => {
-        chrome.storage.local.set({ isAutoPaused: false, pauseReason: '' }, () => {
-          addLog('info', '用户手动恢复自动运行');
-          const pausePanel = widget.querySelector('#x-bot-pause-panel');
-          if (pausePanel) pausePanel.remove();
-        });
-      });
-    }
-  } else {
-    // 非首次渲染：增量更新可变元素
-    const headerTime = widget.querySelector('.x-bot-header-time');
-    if (headerTime) headerTime.textContent = timeStr;
-    
-    const statusText = widget.querySelector('.x-bot-status-text');
-    if (statusText) {
-      statusText.textContent = focusStatus;
-      statusText.style.color = isError ? '#ff4d4f' : '#1DA1F2';
-    }
-    
-    // 更新暂停面板
-    let pausePanel = widget.querySelector('#x-bot-pause-panel');
-    if (botState.isAutoPaused) {
-      if (!pausePanel) {
-        pausePanel = document.createElement('div');
-        pausePanel.id = 'x-bot-pause-panel';
-        pausePanel.className = 'x-bot-pause-panel';
-        const statusPanel = widget.querySelector('.x-bot-status-panel');
-        if (statusPanel) statusPanel.after(pausePanel);
-      }
-      pausePanel.innerHTML = `
-        <div class="x-bot-pause-title">🛑 自动操作已暂停</div>
-        <div class="x-bot-pause-reason">${escapeHtml(botState.pauseReason || '操作失败，等待人工干预')}</div>
-        <button class="x-bot-resume-btn" id="x-bot-resume-btn">▶ 继续自动运行</button>
-      `;
-      pausePanel.style.display = '';
-      // 绑定继续按钮
-      const resumeBtn = pausePanel.querySelector('#x-bot-resume-btn');
-      if (resumeBtn) {
-        resumeBtn.addEventListener('click', () => {
-          chrome.storage.local.set({ isAutoPaused: false, pauseReason: '' }, () => {
-            addLog('info', '用户手动恢复自动运行');
-            if (pausePanel) pausePanel.remove();
-          });
-        });
-      }
-    } else if (pausePanel) {
-      pausePanel.remove();
-    }
-    
-    // 更新配置警告（如果状态变化，需要添加或移除）
-    let configAlert = widget.querySelector('.x-bot-config-alert');
-    if (configErrors.length > 0) {
-      if (!configAlert) {
-        configAlert = document.createElement('div');
-        configAlert.className = 'x-bot-config-alert';
-        const statusPanel = widget.querySelector('.x-bot-status-panel');
-        if (statusPanel) statusPanel.after(configAlert);
-      }
-      configAlert.innerHTML = `
-        <div class="x-bot-config-alert-title">⚠️ 配置不完整</div>
-        <div class="x-bot-config-alert-items">缺少：${configErrors.join('、')}</div>
-        <div class="x-bot-config-alert-hint">请到扩展配置中心补全后再启动</div>
-      `;
-      configAlert.style.display = '';
-    } else if (configAlert) {
-      configAlert.style.display = 'none';
-    }
-    
-    // 更新进度条
-    let progressPanel = widget.querySelector('.x-bot-progress-panel');
-    if (showProgress) {
-      if (!progressPanel) {
-        progressPanel = document.createElement('div');
-        progressPanel.className = 'x-bot-progress-panel';
-        const alertEl = widget.querySelector('.x-bot-config-alert') || widget.querySelector('.x-bot-status-panel');
-        if (alertEl) alertEl.after(progressPanel);
-      }
-      const pClass = progress.stage === 'extracted' ? 'done' : (progress.stage === 'failed' ? 'error' : '');
-      progressPanel.innerHTML = `
-        <div class="x-bot-progress-header">
-          <span class="x-bot-progress-title">📋 Profile 读取进度</span>
-          <span class="x-bot-progress-percent">${progress.percent}%</span>
-        </div>
-        <div class="x-bot-progress-bar-bg">
-          <div class="x-bot-progress-bar-fill" style="width: ${progress.percent}%"></div>
-        </div>
-        <div class="x-bot-progress-msg ${pClass}">${progress.message}</div>
-      `;
-      progressPanel.style.display = '';
-    } else if (progressPanel) {
-      progressPanel.style.display = 'none';
-    }
-    
-    // 更新里程碑
-    const milestones = widget.querySelectorAll('.x-bot-milestone');
-    if (milestones.length >= 5) {
-      milestones[0].className = `x-bot-milestone ${botState.accountBio ? 'done' : ''}`;
-      milestones[0].innerHTML = `${m1} 读取主页简介`;
-      milestones[1].className = `x-bot-milestone ${!isPersonaEmpty ? 'done' : ''}`;
-      milestones[1].innerHTML = `${m2} AI 账号画像分析`;
-      milestones[2].className = `x-bot-milestone ${botState.competitorReport ? 'done' : ''}`;
-      milestones[2].innerHTML = `${m3} 提取竞品起号策略`;
-      milestones[3].className = `x-bot-milestone ${qLen >= 5 ? 'done' : ''}`;
-      milestones[3].innerHTML = `${m4} 储备发文草稿 (${qLen}/20)`;
-      milestones[4].innerHTML = `<span class="x-bot-icon">🚀</span> 今日引流互动 (${repliesSent} 次)`;
-    }
-    
-    // 更新下次发推时间
-    const nextPostEl = widget.querySelector('.x-bot-next-post');
-    if (nextPostEl) nextPostEl.textContent = `下一次发推时间: ${nextPostStr}`;
-    
-    // 更新日志数量
-    const logToggleSpan = widget.querySelector('#x-bot-log-toggle span:first-child');
-    if (logToggleSpan) logToggleSpan.textContent = `📜 运行日志 (${logs.length})`;
-    
-    // 增量更新日志列表：只追加新日志，不动已有 DOM
-    const logListEl = widget.querySelector('#x-bot-log-list');
-    if (logListEl) {
-      const existingItems = logListEl.querySelectorAll('.x-bot-log-item[data-time]');
-      const existingTimes = new Set(Array.from(existingItems).map(el => Number(el.dataset.time)));
-      
-      // 追加新日志到底部
-      recentLogs.forEach(log => {
-        if (!existingTimes.has(log.time)) {
-          logListEl.appendChild(createLogItem(log));
-        }
-      });
-      
-      // 移除已不在 recentLogs 中的旧日志（截断情况）
-      const recentTimes = new Set(recentLogs.map(l => l.time));
-      existingItems.forEach(el => {
-        if (!recentTimes.has(Number(el.dataset.time))) {
-          el.remove();
-        }
-      });
-      
-      // 如果没有日志了，显示空状态
-      if (recentLogs.length === 0 && logListEl.children.length === 0) {
-        logListEl.innerHTML = '<div class="x-bot-log-item"><span class="x-bot-log-msg info">暂无日志...</span></div>';
-      }
-    }
+    });
   }
 }
 

@@ -2,60 +2,94 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>X Auto Bot Popup</title>
+  <title>X Voice Agent</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <div class="popup-container">
-    <div class="header">
-      <div class="logo">🤖 X Auto Bot</div>
-      <button id="settingsBtn" class="icon-btn" title="配置中心">⚙️</button>
-    </div>
-    
-    <div class="status-card">
-      <div class="status-indicator" id="statusIndicator"></div>
-      <div class="status-text" id="statusText">已停止</div>
-    </div>
-    
-    <div class="controls">
-      <button id="toggleBtn" class="btn-main">启动自动化</button>
-    </div>
-
-    <div class="bio-section">
-      <div class="section-title">👤 当前学习定位 (Bio)</div>
-      <div id="bioText" class="bio-text">请先在 X 主页开启自动化以读取简介...</div>
-    </div>
-    
-    <div class="dashboard-card">
-      <div class="dash-row">
-        <span>📦 库存推文</span>
-        <span id="queueCount" class="highlight">0 / 20</span>
+  <div class="popup-shell">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">Personal X Voice Agent</div>
+        <h1>发声控制台</h1>
       </div>
-      <div class="dash-row">
-        <span>🤖 AI 生成状态</span>
-        <span id="genStatus">待机</span>
-      </div>
-      <div class="dash-row">
-        <span>⏳ 下次自动发布</span>
-        <span id="nextPostTime">计算中...</span>
-      </div>
-    </div>
+      <button id="settingsBtn" class="icon-btn" title="策略中心">设置</button>
+    </header>
 
-    
-    <div class="log-link-row">
-      <a href="../logs/logs.html" target="_blank" id="logLink">📜 查看操作记录</a>
-    </div>
+    <section class="agent-status">
+      <div class="status-line">
+        <span class="status-indicator" id="statusIndicator"></span>
+        <span id="statusText">已停止</span>
+      </div>
+      <button id="toggleBtn" class="btn-main">启动 Agent</button>
+    </section>
 
-    <div class="stats">
-      <div class="stat-item">
+    <section class="readiness">
+      <div class="section-head">
+        <span>今日发声计划</span>
+        <a href="../logs/logs.html" target="_blank" id="logLink">行动记录</a>
+      </div>
+      <div class="metric-grid">
+        <div class="metric">
+          <span class="metric-label">草稿库存</span>
+          <strong id="queueCount">0 / 20</strong>
+        </div>
+        <div class="metric">
+          <span class="metric-label">下次发布</span>
+          <strong id="nextPostTime">暂无计划</strong>
+        </div>
+        <div class="metric">
+          <span class="metric-label">AI 状态</span>
+          <strong id="genStatus">待机</strong>
+        </div>
+        <div class="metric">
+          <span class="metric-label">互动次数</span>
+          <strong id="repliesSent">0</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="voice-card">
+      <div class="section-head">
+        <span>当前人设信号</span>
+        <span class="soft-tag">Profile</span>
+      </div>
+      <p id="bioText" class="bio-text">请先在 X 主页开启 Agent 以读取简介。</p>
+    </section>
+
+    <section class="pipeline">
+      <div class="pipeline-item" id="stepConfig">
+        <span class="step-dot"></span>
+        <div>
+          <strong>策略配置</strong>
+          <p>明确目标用户、内容方向和引流边界</p>
+        </div>
+      </div>
+      <div class="pipeline-item" id="stepPersona">
+        <span class="step-dot"></span>
+        <div>
+          <strong>人设校准</strong>
+          <p>基于简介和策略生成表达风格</p>
+        </div>
+      </div>
+      <div class="pipeline-item" id="stepQueue">
+        <span class="step-dot"></span>
+        <div>
+          <strong>内容准备</strong>
+          <p>储备可发布草稿并等待排期</p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="stats">
+      <div>
         <span class="stat-label">已处理推文</span>
         <span class="stat-value" id="tweetsProcessed">0</span>
       </div>
-      <div class="stat-item">
-        <span class="stat-label">自动回复</span>
-        <span class="stat-value" id="repliesSent">0</span>
+      <div>
+        <span class="stat-label">Agent 模式</span>
+        <span class="stat-value">人审优先</span>
       </div>
-    </div>
+    </footer>
   </div>
   <script src="popup.js"></script>
 </body>

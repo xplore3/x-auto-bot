@@ -7,9 +7,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const bioTextSpan = document.getElementById('bioText');
   const genStatusSpan = document.getElementById('genStatus');
   const nextPostTimeSpan = document.getElementById('nextPostTime');
+  const stepConfig = document.getElementById('stepConfig');
+  const stepPersona = document.getElementById('stepPersona');
+  const stepQueue = document.getElementById('stepQueue');
 
   // Load initial state
-  chrome.storage.local.get(['isRunning', 'stats', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors'], (result) => {
+  chrome.storage.local.get(['isRunning', 'stats', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'apiKey', 'leadTarget', 'aiPersona'], (result) => {
     updateUI(result.isRunning, result.configErrors);
     if (result.stats) {
       document.getElementById('tweetsProcessed').textContent = result.stats.tweetsProcessed || 0;
@@ -58,31 +61,40 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   function updateDashboard(data) {
-    if (data.tweetQueue) {
-       queueCountSpan.textContent = data.tweetQueue.length + " / 20";
-    }
+    const queueLength = data.tweetQueue ? data.tweetQueue.length : 0;
+    queueCountSpan.textContent = queueLength + " / 20";
+
     if (data.accountBio) {
        bioTextSpan.textContent = data.accountBio;
     } else {
-       bioTextSpan.textContent = '请先在 X 主页开启自动化以读取简介...';
+       bioTextSpan.textContent = '请先在 X 主页开启 Agent 以读取简介。';
     }
+
     if (data.isGenerating) {
-       genStatusSpan.textContent = "生成中 🔄";
-       genStatusSpan.style.color = "#1DA1F2";
+       genStatusSpan.textContent = "生成中";
+       genStatusSpan.style.color = "#0f8bd6";
     } else {
        genStatusSpan.textContent = "待机";
-       genStatusSpan.style.color = "#17bf63";
+       genStatusSpan.style.color = "#0f9f6e";
     }
+
     if (data.nextPostTime) {
        nextPostTimeSpan.textContent = data.nextPostTime;
     } else {
        nextPostTimeSpan.textContent = "暂无计划";
     }
+
+    const hasConfig = Boolean(data.apiKey && data.leadTarget);
+    const persona = data.aiPersona || {};
+    const hasPersona = Boolean(persona.targetUsers || persona.characteristics || persona.goals);
+    setStepState(stepConfig, hasConfig, data.configErrors && data.configErrors.length > 0);
+    setStepState(stepPersona, hasPersona, false);
+    setStepState(stepQueue, queueLength > 0, false);
   }
 
   // Listen for updates from background
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    chrome.storage.local.get(['tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'isRunning'], (result) => {
+    chrome.storage.local.get(['tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'isRunning', 'apiKey', 'leadTarget', 'aiPersona'], (result) => {
        updateDashboard(result);
        updateUI(result.isRunning, result.configErrors);
     });
@@ -102,19 +114,25 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isRunning) {
       statusIndicator.classList.add('active');
       statusText.textContent = '运行中';
-      toggleBtn.textContent = '停止自动化';
+      toggleBtn.textContent = '停止 Agent';
       toggleBtn.classList.add('stop');
     } else {
       statusIndicator.classList.remove('active');
-      toggleBtn.textContent = '启动自动化';
+      toggleBtn.textContent = '启动 Agent';
       toggleBtn.classList.remove('stop');
       
       if (configErrors && configErrors.length > 0) {
-        statusText.textContent = `⚠️ ${configErrors.join('、')}`;
-        statusText.style.color = '#f5a623';
+        statusText.textContent = `待配置：${configErrors.join('、')}`;
+        statusText.style.color = '#b7791f';
       } else {
         statusText.textContent = '已停止';
       }
     }
+  }
+
+  function setStepState(element, isDone, hasWarning) {
+    if (!element) return;
+    element.classList.toggle('done', Boolean(isDone));
+    element.classList.toggle('warning', Boolean(hasWarning && !isDone));
   }
 });

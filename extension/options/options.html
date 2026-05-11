@@ -2,96 +2,155 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>X Auto Bot 配置中心</title>
+  <title>X Voice Agent 策略中心</title>
   <link rel="stylesheet" href="options.css">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>X Auto Bot 🤖</h1>
-      <p>配置您的自动化助手策略</p>
-    </header>
-    
-    <main>
-      <section class="card">
-        <h2>🔑 基础配置 (API)</h2>
-        <div class="form-group">
-          <label for="apiProvider">AI 服务商 (API Provider)</label>
-          <select id="apiProvider" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: #fff; margin-bottom: 12px; font-size: 14px; appearance: menulist;">
-            <option value="gemini">Google Gemini 官方 (免费但限制多)</option>
-            <option value="openrouter">OpenRouter (推荐, 支持多模型)</option>
-            <option value="qwen">通义千问 Qwen (阿里 DashScope)</option>
-            <option value="deepseek">DeepSeek (深度求索)</option>
-          </select>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">X</span>
+        <div>
+          <strong>Voice Agent</strong>
+          <span>个人发声系统</span>
         </div>
-        <div class="form-group">
-          <label for="apiKey">API Key</label>
-          <input type="password" id="apiKey" placeholder="输入您的 API Key" />
-          <p class="help-text">用于调用大模型生成回复和推文，<a href="https://aistudio.google.com/app/apikey" target="_blank">获取 Gemini Key</a>、<a href="https://openrouter.ai/keys" target="_blank">获取 OpenRouter Key</a>、<a href="https://dashscope.console.aliyun.com/apiKey" target="_blank">获取千问 Key</a> 或 <a href="https://platform.deepseek.com/api_keys" target="_blank">获取 DeepSeek Key</a></p>
+      </div>
+      <nav>
+        <a href="#strategy">定位策略</a>
+        <a href="#model">模型连接</a>
+        <a href="#publishing">发布节奏</a>
+        <a href="#diagnostics">链路测试</a>
+        <a href="#intelligence">智能分析</a>
+        <a href="../logs/logs.html">行动记录</a>
+      </nav>
+    </aside>
+
+    <main class="workspace">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Strategy Center</p>
+          <h1>让 Agent 按你的定位持续发声</h1>
+          <p>配置目标用户、表达边界、内容节奏和发布链路。默认保留人工确认，先形成稳定表达系统，再扩大自动化。</p>
         </div>
-        <div class="form-group" id="modelGroup" style="display: none;">
-          <label for="aiModel">大模型名称 (Model ID)</label>
-          <input type="text" id="aiModel" placeholder="例如：google/gemini-2.5-flash" />
-          <p class="help-text" id="modelHelpText">请在 OpenRouter 官网查找你想使用的模型 ID，如 <code>anthropic/claude-3-haiku</code>、<code>openai/gpt-4o-mini</code> 或 <code>google/gemini-2.5-flash</code>。</p>
+        <button id="saveBtn" class="btn-primary">保存策略</button>
+      </header>
+
+      <section class="panel" id="strategy">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Step 1</p>
+            <h2>定位策略</h2>
+          </div>
+          <span class="panel-tag">Voice</span>
+        </div>
+
+        <div class="field-grid">
+          <div class="form-group span-2">
+            <label for="leadTarget">引流目标 / 自我介绍 / 行动入口</label>
+            <textarea id="leadTarget" rows="4" placeholder="例如：我长期分享 AI 工具、出海项目和个人商业化实操，欢迎关注交流。"></textarea>
+            <p class="help-text">这是 Agent 判断内容转化方向的核心信息，不建议写成硬广告。</p>
+          </div>
+
+          <div class="form-group">
+            <label for="targetUsers">优先关注用户</label>
+            <textarea id="targetUsers" rows="7" placeholder="elonmusk&#10;OpenAI&#10;levelsio"></textarea>
+            <p class="help-text">每行一个账号，后续用于浏览、学习和互动。</p>
+          </div>
+
+          <div class="form-group">
+            <label for="promptTemplate">回复 Prompt</label>
+            <textarea id="promptTemplate" rows="7" placeholder="你是一个..."></textarea>
+            <p class="help-text">支持 <code>{tweet}</code> 和 <code>{leadTarget}</code> 两个变量。</p>
+          </div>
         </div>
       </section>
 
-      <section class="card">
-        <h2>🎯 账号与策略配置</h2>
-        <div class="form-group">
-          <label for="targetUsers">目标关注用户 (换行分隔)</label>
-          <textarea id="targetUsers" rows="4" placeholder="elonmusk&#10;OpenAI"></textarea>
-          <p class="help-text">插件将优先浏览这些用户的推文并进行回复。</p>
+      <section class="panel" id="model">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Step 2</p>
+            <h2>模型连接</h2>
+          </div>
+          <span class="panel-tag">AI</span>
         </div>
-        
-        <div class="form-group">
-          <label for="promptTemplate">AI 扮演角色与回复 Prompt</label>
-          <textarea id="promptTemplate" rows="6" placeholder="你是一个..."></textarea>
-          <p class="help-text">使用 <code>{tweet}</code> 代表原推文，使用 <code>{leadTarget}</code> 代表你的引流信息。</p>
+
+        <div class="field-grid">
+          <div class="form-group">
+            <label for="apiProvider">AI 服务商</label>
+            <select id="apiProvider">
+              <option value="gemini">Google Gemini 官方</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="qwen">通义千问 Qwen</option>
+              <option value="deepseek">DeepSeek</option>
+            </select>
+            <p class="help-text">用于生成回复、草稿、账号画像和竞品分析。</p>
+          </div>
+
+          <div class="form-group">
+            <label for="apiKey">API Key</label>
+            <input type="password" id="apiKey" placeholder="输入 API Key" />
+            <p class="help-text">仅保存在 Chrome 本地扩展存储中。</p>
+          </div>
+
+          <div class="form-group span-2" id="modelGroup">
+            <label for="aiModel">模型名称</label>
+            <input type="text" id="aiModel" placeholder="例如：google/gemini-2.5-flash" />
+            <p class="help-text" id="modelHelpText">请填写当前服务商支持的模型 ID。</p>
+          </div>
         </div>
       </section>
 
-      <section class="card">
-        <h2>🧲 引流设置 (Lead Generation)</h2>
-        <div class="form-group">
-          <label for="leadTarget">引流目标 / 植入链接 / 自我介绍</label>
-          <textarea id="leadTarget" rows="3" placeholder="例如：顺便分享一个我刚做的超酷AI工具：https://example.com"></textarea>
-          <p class="help-text">AI 会在生成的回复中，寻找合适的机会软性植入这段引流信息，吸引用户点击或关注。</p>
+      <section class="panel" id="publishing">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Step 3</p>
+            <h2>发布节奏</h2>
+          </div>
+          <span class="panel-tag">Schedule</span>
+        </div>
+
+        <div class="field-grid compact">
+          <div class="form-group">
+            <label for="postsPerDay">每日最大发推数</label>
+            <input type="number" id="postsPerDay" min="1" max="50" value="10" />
+            <p class="help-text">达到上限后自动顺延至次日。</p>
+          </div>
+
+          <div class="form-group">
+            <label for="postScheduleMode">调度模式</label>
+            <select id="postScheduleMode">
+              <option value="smart">智能时段分布</option>
+              <option value="interval">固定间隔</option>
+            </select>
+            <p class="help-text">智能时段更适合长期账号经营。</p>
+          </div>
+
+          <div class="form-group" id="smartSlotsGroup">
+            <label for="smartTimeSlots">发推时段</label>
+            <input type="text" id="smartTimeSlots" value="8-10,12-14,19-23" placeholder="8-10,12-14,19-23" />
+            <p class="help-text">24 小时制，多个时段用逗号分隔。</p>
+          </div>
+
+          <div class="form-group" id="intervalGroup">
+            <label for="postInterval">发推间隔（分钟）</label>
+            <input type="number" id="postInterval" min="15" max="1440" value="30" />
+            <p class="help-text">从上一条成功发布后开始计算。</p>
+          </div>
         </div>
       </section>
 
-      <section class="card">
-        <h2>⏰ 发推调度策略</h2>
-        <div class="form-group">
-          <label for="postsPerDay">每日最大发推数</label>
-          <input type="number" id="postsPerDay" min="1" max="50" value="10" style="width: 120px;" />
-          <p class="help-text">超过此数量后，当天不再自动发推，顺延至次日。</p>
+      <section class="panel" id="diagnostics">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Step 4</p>
+            <h2>发帖链路测试</h2>
+          </div>
+          <span class="panel-tag warning">Live</span>
         </div>
-        <div class="form-group">
-          <label for="postScheduleMode">调度模式</label>
-          <select id="postScheduleMode" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: #fff; font-size: 14px; appearance: menulist;">
-            <option value="smart">智能时段分布（按设定时段均匀分布）</option>
-            <option value="interval">固定间隔（每隔 N 分钟发一条）</option>
-          </select>
-        </div>
-        <div class="form-group" id="smartSlotsGroup">
-          <label for="smartTimeSlots">发推时段（格式：开始-结束, 用逗号分隔）</label>
-          <input type="text" id="smartTimeSlots" value="8-10,12-14,19-23" placeholder="例如：8-10,12-14,19-23" />
-          <p class="help-text">24小时制，每个时段内只会安排一条发推，自动跳转到下一个时段。当前时段内不会重复发推。</p>
-        </div>
-        <div class="form-group" id="intervalGroup" style="display: none;">
-          <label for="postInterval">发推间隔（分钟）</label>
-          <input type="number" id="postInterval" min="15" max="1440" value="30" style="width: 120px;" />
-          <p class="help-text">从上一条发推完成的时间开始计算，固定间隔 N 分钟后发下一条。</p>
-        </div>
-      </section>
 
-      <section class="card">
-        <h2>🧪 发帖链路测试</h2>
         <div class="form-group">
           <label for="testPostText">中文测试推文</label>
-          <textarea id="testPostText" rows="5">AI副业别先找工具。
+          <textarea id="testPostText" rows="7">AI副业别先找工具。
 
 先找需求：
 谁在海外平台付费？
@@ -99,40 +158,46 @@
 你能不能用AI把交付成本压低？
 
 工具不值钱，能交付结果才值钱。</textarea>
-          <p class="help-text">不依赖 API Key，直接验证 X 发帖页、中文预填、文本校验和发送按钮状态。</p>
+          <p class="help-text">不依赖 API Key，用来验证登录态、中文预填、文本校验和发送按钮状态。</p>
         </div>
-        <button id="testPostBtn" class="btn-secondary" type="button">立即测试发帖</button>
+        <button id="testPostBtn" class="btn-secondary" type="button">启动测试发帖</button>
       </section>
 
-      <section class="card">
-        <h2>🧠 AI 账号画像分析 (自动生成，可修改)</h2>
-        <p class="help-text" style="margin-bottom: 12px;">当系统读取到您的 X 主页简介时，会自动通过大模型推断以下信息，用于指导自动发帖与回复风格。您可以自由审阅并手动修改这些内容以校准 AI。</p>
-        <div class="form-group">
-          <label for="aiTargetUsers">🎯 目标用户群体</label>
-          <textarea id="aiTargetUsers" rows="2" placeholder="等待 AI 分析..."></textarea>
+      <section class="panel" id="intelligence">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Agent Memory</p>
+            <h2>智能分析结果</h2>
+          </div>
+          <span class="panel-tag">Editable</span>
         </div>
-        <div class="form-group">
-          <label for="aiCharacteristics">✍️ 发文特征与人设语气</label>
-          <textarea id="aiCharacteristics" rows="3" placeholder="等待 AI 分析..."></textarea>
-        </div>
-        <div class="form-group">
-          <label for="aiGoals">💰 发文及引流核心目标</label>
-          <textarea id="aiGoals" rows="2" placeholder="等待 AI 分析..."></textarea>
+
+        <div class="field-grid">
+          <div class="form-group">
+            <label for="aiTargetUsers">目标用户群体</label>
+            <textarea id="aiTargetUsers" rows="3" placeholder="等待 AI 分析，或手动填写..."></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="aiGoals">发文及引流核心目标</label>
+            <textarea id="aiGoals" rows="3" placeholder="等待 AI 分析，或手动填写..."></textarea>
+          </div>
+
+          <div class="form-group span-2">
+            <label for="aiCharacteristics">发文特征与人设语气</label>
+            <textarea id="aiCharacteristics" rows="4" placeholder="等待 AI 分析，或手动填写..."></textarea>
+          </div>
+
+          <div class="form-group span-2">
+            <label for="competitorReport">竞品对标与低粉爆款运营拆解报告</label>
+            <textarea id="competitorReport" rows="14" placeholder="账号画像完成后会自动生成，也可以手动维护。"></textarea>
+          </div>
         </div>
       </section>
-      
-      <section class="card">
-        <h2>📊 竞品对标与低粉爆款运营拆解报告 (可修改)</h2>
-        <p class="help-text" style="margin-bottom: 12px;">这是 AI 根据您的定位，结合其全网知识库，为您总结的 10 个对标竞品以及“低粉账号起号的 3 个核心套路”。这个报告会被注入到后期的写推文引擎中。您可以随意编辑或补充此策略。</p>
-        <div class="form-group">
-          <textarea id="competitorReport" rows="15" placeholder="正在拼命分析生成中，这可能需要几十秒..."></textarea>
-        </div>
-      </section>
-      
-      <div class="actions">
-        <button id="saveBtn" class="btn-primary">保存配置</button>
-        <a href="../logs/logs.html" class="btn-secondary">📜 查看操作记录</a>
+
+      <div class="sticky-actions">
         <span id="statusMessage" class="status-msg"></span>
+        <button id="saveBtnMirror" class="btn-primary" type="button">保存策略</button>
       </div>
     </main>
   </div>

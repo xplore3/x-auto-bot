@@ -1,5 +1,6 @@
 document.addEventListener('DOMContentLoaded', restoreOptions);
 document.getElementById('saveBtn').addEventListener('click', saveOptions);
+document.getElementById('saveBtnMirror').addEventListener('click', saveOptions);
 document.getElementById('apiProvider').addEventListener('change', toggleModelInput);
 document.getElementById('postScheduleMode').addEventListener('change', toggleScheduleMode);
 document.getElementById('testPostBtn').addEventListener('click', testPostNow);
