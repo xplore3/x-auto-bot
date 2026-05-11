@@ -162,9 +162,15 @@ function ensureBioExtracted() {
           return;
         }
         if (checkCount > 20) {
-          addLog('warn', '在 Profile 页面等待简介超时，尝试从当前页面提取...');
-          chrome.storage.local.set({ accountBio: document.querySelector('div[data-testid="UserDescription"]')?.innerText?.trim() || '' });
-          setProfileProgress('extracted', '已尝试提取', 100);
+          const fallbackBio = document.querySelector('div[data-testid="UserDescription"]')?.innerText?.trim() || '';
+          if (fallbackBio) {
+            chrome.storage.local.set({ accountBio: fallbackBio });
+            setProfileProgress('extracted', '主页简介已读取', 100);
+          } else {
+            addLog('warn', '在 Profile 页面等待简介超时，未读取到简介');
+            chrome.storage.local.set({ accountBio: '' });
+            setProfileProgress('failed', '简介读取失败，可在策略中心手动填写人设', 0);
+          }
           clearInterval(checkInterval);
         }
       } else {
@@ -177,7 +183,7 @@ function ensureBioExtracted() {
         if (checkCount > 15) {
           addLog('warn', '等待 Profile 页面加载超时，跳过简介提取');
           chrome.storage.local.set({ accountBio: '' });
-          setProfileProgress('failed', '简介提取超时', 100);
+          setProfileProgress('failed', '简介读取失败，可刷新 X 后重试或手动填写人设', 0);
           clearInterval(checkInterval);
         }
       }
@@ -385,6 +391,16 @@ function renderWidget() {
   
   const apiCooldownSecs = botState.apiCooldownUntil && botState.apiCooldownUntil > now
     ? Math.ceil((botState.apiCooldownUntil - now) / 1000) : 0;
+
+  const progress = botState.profileReadProgress || { stage: 'idle', percent: 0, message: '等待启动...' };
+  const profileFailed = progress.stage === 'failed';
+  const profileProgressValue = profileFailed ? 0 : Math.max(0, Math.min(100, progress.percent || 0));
+  const profileProgressLabel = profileFailed ? '失败' : `${profileProgressValue}%`;
+  const showProgress = botState.isRunning && (!botState.accountBio || profileFailed);
+  const progressClass = progress.stage === 'extracted' ? 'done' : (profileFailed ? 'error' : '');
+  const strategyGaps = [];
+  if (isPersonaEmpty) strategyGaps.push('人设与目标用户');
+  if (!botState.competitorReport) strategyGaps.push('竞品与爆款框架');
   
   let focusStatus = '';
   let statusClass = 'idle';
@@ -416,8 +432,11 @@ function renderWidget() {
   } else if (botState.isGenerating) {
     focusStatus = '正在生成内容草稿';
     statusClass = 'active';
-  } else if (isPersonaEmpty || !botState.competitorReport) {
-    focusStatus = '策略基建未完成，暂不执行互动';
+  } else if (profileFailed && isPersonaEmpty) {
+    focusStatus = '简介读取失败：请在策略中心手动填写人设';
+    statusClass = 'warn';
+  } else if (strategyGaps.length > 0) {
+    focusStatus = `待补齐：${strategyGaps.join('、')}`;
     statusClass = 'warn';
   } else {
     focusStatus = '运行中：正在观察时间线和排期';
@@ -427,10 +446,6 @@ function renderWidget() {
   const repliesSent = botState.stats ? botState.stats.repliesSent : 0;
   const timeStr = new Date().toLocaleTimeString('en-US', { hour12: false });
   const nextPostStr = botState.nextPostTime ? botState.nextPostTime : '待计算';
-
-  const progress = botState.profileReadProgress || { stage: 'idle', percent: 0, message: '等待启动...' };
-  const showProgress = !botState.accountBio && botState.isRunning;
-  const progressClass = progress.stage === 'extracted' ? 'done' : (progress.stage === 'failed' ? 'error' : '');
 
   const logs = botState.logs || [];
   const recentLogs = logs.slice(-12);
@@ -444,8 +459,8 @@ function renderWidget() {
         </div>
       `).join('');
 
-  const milestone = (done, label, meta = '') => `
-    <div class="x-bot-milestone ${done ? 'done' : ''}">
+  const milestone = (state, label, meta = '') => `
+    <div class="x-bot-milestone ${state}">
       <span class="x-bot-dot"></span>
       <span>${label}${meta ? ` <em>${meta}</em>` : ''}</span>
     </div>
@@ -570,6 +585,9 @@ function renderWidget() {
         font-weight: 800;
         font-size: 12px;
       }
+      .x-bot-progress-percent.error {
+        color: #d64545;
+      }
       .x-bot-progress-bar-bg {
         height: 5px;
         background: #eef2f5;
@@ -581,10 +599,17 @@ function renderWidget() {
         background: #0f8bd6;
         border-radius: 999px;
       }
+      .x-bot-progress-bar-fill.error {
+        background: #d64545;
+      }
       .x-bot-progress-msg {
         margin-top: 7px;
         color: #65717e;
         font-size: 12px;
+      }
+      .x-bot-progress-msg.error {
+        color: #d64545;
+        font-weight: 700;
       }
       .x-bot-milestones {
         display: grid;
@@ -601,6 +626,9 @@ function renderWidget() {
       .x-bot-milestone.done {
         color: #17212b;
       }
+      .x-bot-milestone.failed {
+        color: #d64545;
+      }
       .x-bot-dot {
         width: 8px;
         height: 8px;
@@ -609,6 +637,9 @@ function renderWidget() {
       }
       .x-bot-milestone.done .x-bot-dot {
         background: #0f9f6e;
+      }
+      .x-bot-milestone.failed .x-bot-dot {
+        background: #d64545;
       }
       .x-bot-milestone em {
         color: #0f8bd6;
@@ -724,20 +755,20 @@ function renderWidget() {
       <div class="x-bot-progress-panel">
         <div class="x-bot-progress-header">
           <span class="x-bot-progress-title">Profile Readiness</span>
-          <span class="x-bot-progress-percent">${progress.percent}%</span>
+          <span class="x-bot-progress-percent ${progressClass}">${profileProgressLabel}</span>
         </div>
         <div class="x-bot-progress-bar-bg">
-          <div class="x-bot-progress-bar-fill" style="width: ${progress.percent}%"></div>
+          <div class="x-bot-progress-bar-fill ${progressClass}" style="width: ${profileProgressValue}%"></div>
         </div>
         <div class="x-bot-progress-msg ${progressClass}">${escapeHtml(progress.message)}</div>
       </div>
     ` : ''}
 
     <div class="x-bot-milestones">
-      ${milestone(Boolean(botState.accountBio), '读取主页简介')}
-      ${milestone(!isPersonaEmpty, '人设与目标用户')}
-      ${milestone(Boolean(botState.competitorReport), '竞品与爆款框架')}
-      ${milestone(qLen >= 5, '内容草稿库存', `${qLen}/20`)}
+      ${milestone(botState.accountBio ? 'done' : (profileFailed ? 'failed' : 'pending'), '读取主页简介')}
+      ${milestone(!isPersonaEmpty ? 'done' : 'pending', '人设与目标用户')}
+      ${milestone(botState.competitorReport ? 'done' : 'pending', '竞品与爆款框架')}
+      ${milestone(qLen >= 5 ? 'done' : 'pending', '内容草稿库存', `${qLen}/20`)}
     </div>
 
     <div class="x-bot-next-post">
