@@ -446,6 +446,7 @@ function renderWidget() {
   const repliesSent = botState.stats ? botState.stats.repliesSent : 0;
   const timeStr = new Date().toLocaleTimeString('en-US', { hour12: false });
   const nextPostStr = botState.nextPostTime ? botState.nextPostTime : '待计算';
+  const logoUrl = chrome.runtime.getURL('assets/icons/icon-48.png');
 
   const logs = botState.logs || [];
   const recentLogs = logs.slice(-12);
@@ -496,6 +497,13 @@ function renderWidget() {
         align-items: center;
         gap: 9px;
         font-weight: 800;
+      }
+      .x-bot-logo {
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+        background: #fff;
+        object-fit: contain;
       }
       .x-bot-status-dot {
         width: 9px;
@@ -725,6 +733,7 @@ function renderWidget() {
     </style>
     <div class="x-bot-header">
       <div class="x-bot-title">
+        <img class="x-bot-logo" src="${logoUrl}" alt="">
         <span class="x-bot-status-dot ${statusClass}"></span>
         <span>Voice Agent</span>
       </div>

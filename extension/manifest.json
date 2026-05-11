@@ -3,6 +3,12 @@
   "name": "X Auto Bot (AI Agent)",
   "version": "1.0.0",
   "description": "自动浏览、发帖并使用 AI 在 X (Twitter) 上回复。",
+  "icons": {
+    "16": "assets/icons/icon-16.png",
+    "32": "assets/icons/icon-32.png",
+    "48": "assets/icons/icon-48.png",
+    "128": "assets/icons/icon-128.png"
+  },
   "permissions": [
     "storage",
     "activeTab",
@@ -17,6 +23,12 @@
     "service_worker": "background.js"
   },
   "action": {
+    "default_icon": {
+      "16": "assets/icons/icon-16.png",
+      "32": "assets/icons/icon-32.png",
+      "48": "assets/icons/icon-48.png",
+      "128": "assets/icons/icon-128.png"
+    },
     "default_popup": "popup/popup.html",
     "default_title": "X Auto Bot 控制面板"
   },
@@ -32,6 +44,18 @@
         "content/x_automator.js"
       ],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/icons/icon-48.png",
+        "assets/icons/icon-128.png"
+      ],
+      "matches": [
+        "*://*.x.com/*",
+        "*://*.twitter.com/*"
+      ]
     }
   ]
 }
