@@ -38,6 +38,91 @@ function setProfileProgress(stage, message, percent) {
   chrome.storage.local.set({ profileReadProgress: progress });
 }
 
+function getProfileLinkNode() {
+  const directSelectors = [
+    'a[data-testid="AppTabBar_Profile_Link"]',
+    'header[role="banner"] a[aria-label*="Profile"]',
+    'header[role="banner"] a[aria-label*="个人"]',
+    'nav a[aria-label*="Profile"]',
+    'nav a[aria-label*="个人"]'
+  ];
+
+  for (const selector of directSelectors) {
+    const node = document.querySelector(selector);
+    if (node?.href) return node;
+  }
+
+  return Array.from(document.querySelectorAll('header[role="banner"] nav a[href^="/"], nav a[href^="/"]'))
+    .find(link => isProfilePath(new URL(link.href).pathname));
+}
+
+function isProfilePath(pathname = '') {
+  const firstSegment = pathname.split('/').filter(Boolean)[0] || '';
+  const blocked = new Set([
+    'home', 'explore', 'notifications', 'messages', 'i', 'settings',
+    'compose', 'search', 'jobs', 'communities', 'premium', 'verified_orgs'
+  ]);
+  return /^[A-Za-z0-9_]{1,15}$/.test(firstSegment) && !blocked.has(firstSegment.toLowerCase());
+}
+
+function getCurrentProfilePath() {
+  const firstSegment = window.location.pathname.split('/').filter(Boolean)[0] || '';
+  return isProfilePath(`/${firstSegment}`) ? `/${firstSegment}` : '';
+}
+
+function getProfilePathFromNav() {
+  const profileLinkNode = getProfileLinkNode();
+  if (!profileLinkNode?.href) return '';
+  return new URL(profileLinkNode.href).pathname.split('/').slice(0, 2).join('/');
+}
+
+function isOnTargetProfilePage(profilePath) {
+  const currentProfilePath = getCurrentProfilePath();
+  if (!currentProfilePath) return false;
+  return profilePath ? currentProfilePath.toLowerCase() === profilePath.toLowerCase() : true;
+}
+
+function extractFirstMatch(text, patterns) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1].trim();
+  }
+  return '';
+}
+
+function extractProfileSnapshot() {
+  const bioText = document.querySelector('div[data-testid="UserDescription"]')?.innerText?.trim() || '';
+  const nameText = document.querySelector('div[data-testid="UserName"]')?.innerText?.trim() || '';
+  const nameLines = nameText.split('\n').map(line => line.trim()).filter(Boolean);
+  const displayName = nameLines.find(line => !line.startsWith('@')) || '';
+  const handleFromName = extractFirstMatch(nameText, [/@([A-Za-z0-9_]{1,15})/]);
+  const handleFromPath = getCurrentProfilePath().replace('/', '');
+  const handle = handleFromName || handleFromPath;
+  const mainText = document.querySelector('main')?.innerText || document.body.innerText || '';
+  const following = extractFirstMatch(mainText, [
+    /([0-9,.万千Kk]+)\s*(?:Following|正在关注|关注中)/,
+    /(?:Following|正在关注|关注中)\s*([0-9,.万千Kk]+)/
+  ]);
+  const followers = extractFirstMatch(mainText, [
+    /([0-9,.万千Kk]+)\s*(?:Followers|粉丝|关注者)/,
+    /(?:Followers|粉丝|关注者)\s*([0-9,.万千Kk]+)/
+  ]);
+
+  const lines = [];
+  if (displayName || handle) lines.push(`账号：${displayName || '未读取到昵称'}${handle ? ` (@${handle})` : ''}`);
+  lines.push(`主页简介：${bioText || '未填写或未公开显示'}`);
+  if (following || followers) {
+    lines.push(`账号数据：${following ? `关注 ${following}` : ''}${following && followers ? '，' : ''}${followers ? `粉丝 ${followers}` : ''}`);
+  }
+  if (handle) lines.push(`主页链接：https://x.com/${handle}`);
+
+  return {
+    text: lines.join('\n').trim(),
+    hasIdentity: Boolean(displayName || handle || bioText),
+    hasBio: Boolean(bioText)
+  };
+}
+
 // ==========================================
 // Auto Scroll Logic
 // ==========================================
@@ -125,8 +210,9 @@ chrome.storage.local.get(['isRunning', 'profileReadRequested'], (result) => {
 
 function notifyXLoginDetectedIfNeeded() {
   if (xLoginDetectedNotified || !chrome.runtime?.id) return;
-  const profileLinkNode = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
-  if (!profileLinkNode) return;
+  const profileLinkNode = getProfileLinkNode();
+  const accountSwitcher = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]');
+  if (!profileLinkNode && !accountSwitcher) return;
   xLoginDetectedNotified = true;
   chrome.runtime.sendMessage({ action: 'xLoginDetected' }, () => {});
 }
@@ -167,9 +253,9 @@ function ensureBioExtracted(options = {}) {
       if (!chrome.runtime?.id) { clearInterval(checkInterval); return; }
       checkCount++;
       
-      const profileLinkNode = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
-      if (!profileLinkNode) {
-        if (force && checkCount > 12) {
+      const profilePath = getProfilePathFromNav();
+      if (!profilePath && !getCurrentProfilePath()) {
+        if (force && checkCount > 20) {
           addLog('warn', '未检测到 X 登录态，无法读取主页简介');
           chrome.storage.local.set({
             accountBio: '',
@@ -185,40 +271,35 @@ function ensureBioExtracted(options = {}) {
         return;
       }
       
-      const profilePath = new URL(profileLinkNode.href).pathname;
-      if (window.location.pathname.includes(profilePath)) {
-        // We are on the profile page, wait for UserDescription
-        setProfileProgress('waiting_bio', '正在 Profile 页面等待简介 DOM...', 65);
-        const bioNode = document.querySelector('div[data-testid="UserDescription"]');
-        if (bioNode) {
-          const bioText = bioNode.innerText.trim();
-          chrome.storage.local.set({ accountBio: bioText, profileReadRequested: false }, () => {
-            addLog('success', `主页简介已提取: ${bioText.substring(0, 30)}...`);
-            setProfileProgress('extracted', '主页简介已读取', 100);
+      if (isOnTargetProfilePage(profilePath)) {
+        setProfileProgress('waiting_bio', '正在 Profile 页面读取账号信息...', 65);
+        const snapshot = extractProfileSnapshot();
+        if (snapshot.hasIdentity) {
+          chrome.storage.local.set({ accountBio: snapshot.text, profileReadRequested: false }, () => {
+            addLog('success', `主页信息已提取: ${snapshot.text.substring(0, 50)}...`);
+            setProfileProgress(
+              'extracted',
+              snapshot.hasBio ? '主页简介已读取' : '主页信息已读取，简介为空，已使用账号信息兜底',
+              100
+            );
           });
           clearInterval(checkInterval);
           return;
         }
-        if (checkCount > 20) {
-          const fallbackBio = document.querySelector('div[data-testid="UserDescription"]')?.innerText?.trim() || '';
-          if (fallbackBio) {
-            chrome.storage.local.set({ accountBio: fallbackBio, profileReadRequested: false });
-            setProfileProgress('extracted', '主页简介已读取', 100);
-          } else {
-            addLog('warn', '在 Profile 页面等待简介超时，未读取到简介');
-            chrome.storage.local.set({ accountBio: '', profileReadRequested: false });
-            setProfileProgress('failed', '简介读取失败，可在长期记忆中心手动填写人设', 0);
-          }
+        if (checkCount > 30) {
+          addLog('warn', '在 Profile 页面等待账号信息超时，未读取到简介');
+          chrome.storage.local.set({ accountBio: '', profileReadRequested: false });
+          setProfileProgress('failed', '简介读取失败，可在长期记忆中心手动填写人设', 0);
           clearInterval(checkInterval);
         }
       } else {
-        // Not on profile page, open it in background
         if (checkCount === 1) {
           setProfileProgress('opening_page', '正在打开 Profile 页面...', 35);
           addLog('info', '当前不在 Profile 页面，后台静默打开...');
           chrome.runtime.sendMessage({ action: 'openProfileTab', url: `https://x.com${profilePath}` });
+          clearInterval(checkInterval);
         }
-        if (checkCount > 15) {
+        if (checkCount > 25) {
           addLog('warn', '等待 Profile 页面加载超时，跳过简介提取');
           chrome.storage.local.set({ accountBio: '', profileReadRequested: false });
           setProfileProgress('failed', '简介读取失败，可刷新 X 后重试或手动填写人设', 0);
