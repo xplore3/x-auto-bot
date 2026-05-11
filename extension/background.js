@@ -26,6 +26,8 @@ chrome.runtime.onInstalled.addListener(() => {
       chrome.storage.local.set({
         isRunning: false,
         apiKey: '',
+        apiProvider: 'gemini',
+        aiModel: 'gemini-2.5-flash',
         targetUsers: '',
         promptTemplate: '你是一个社交媒体引流专家。请根据推文内容，给出一段简短、神回复级别的评论（不超过 40 个字）。\n如果合适的话，请巧妙、自然地顺带提及我的【引流信息】，千万不要显得像生硬的广告，要像朋友间的随口分享：\n\n【推文】：{tweet}\n【引流信息】：{leadTarget}\n\n回复：',
         leadTarget: '',
@@ -58,6 +60,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // 保持通道异步开启
   } else if (request.action === "queueUpdated") {
     checkAndSetupAlarm();
+  } else if (request.action === "xLoginDetected") {
+    handleXLoginDetected();
+    sendResponse({ success: true });
+  } else if (request.action === "startAccountAutoSetup") {
+    startAccountAutoSetup(sendResponse);
+    return true;
+  } else if (request.action === "maybeStartAgentAfterSetup") {
+    maybeStartAgentAfterSetup(sendResponse);
+    return true;
   } else if (request.action === "testPostNow") {
     const text = (request.text || '').trim();
     if (!text) {
@@ -114,12 +125,104 @@ function getConfigErrors(config) {
   const errors = [];
   if (!config.apiKey) errors.push('缺少 API Key');
   if (!config.leadTarget) errors.push('缺少引流目标');
-  if (config.apiProvider !== 'gemini' && !config.aiModel) errors.push('缺少模型名称');
+  if ((config.apiProvider || 'gemini') !== 'gemini' && !config.aiModel) errors.push('缺少模型名称');
+  return errors;
+}
+
+function getAIConnectionErrors(config) {
+  const errors = [];
+  if (!config.apiKey) errors.push('缺少 API Key');
+  if ((config.apiProvider || 'gemini') !== 'gemini' && !config.aiModel) errors.push('缺少模型名称');
   return errors;
 }
 
 function isConfigValid(config) {
   return getConfigErrors(config).length === 0;
+}
+
+function hasPersona(persona) {
+  return Boolean(persona && (persona.targetUsers || persona.characteristics || persona.goals));
+}
+
+function handleXLoginDetected() {
+  chrome.storage.local.get(['xLoginSettingsOpened', 'apiKey', 'leadTarget', 'aiPersona', 'competitorReport'], (res) => {
+    const ready = Boolean(res.apiKey && res.leadTarget && hasPersona(res.aiPersona) && res.competitorReport);
+    if (res.xLoginSettingsOpened || ready) return;
+
+    chrome.storage.local.set({ xLoginSettingsOpened: true }, () => {
+      addLog('info', '检测到 X 已登录，自动打开策略中心');
+      chrome.runtime.openOptionsPage();
+    });
+  });
+}
+
+function startAccountAutoSetup(sendResponse) {
+  chrome.storage.local.set({
+    profileReadRequested: true,
+    setupAutoStartRequested: true,
+    isAutoPaused: false,
+    pauseReason: '',
+    profileReadProgress: {
+      stage: 'queued',
+      message: '已开始读取 X 账号，等待页面响应...',
+      percent: 10,
+      updatedAt: Date.now()
+    }
+  }, () => {
+    chrome.storage.local.get(['accountBio'], (res) => {
+      if (res.accountBio) {
+        addLog('info', '使用已读取的主页简介重新分析账号画像');
+        analyzeAccountPersona(res.accountBio);
+        sendResponse({ success: true, message: '已使用当前简介开始 AI 分析' });
+        return;
+      }
+
+      triggerProfileReadInTab();
+      sendResponse({ success: true, message: '已开始读取 X 账号，请保持 X 页面已登录' });
+    });
+  });
+}
+
+function triggerProfileReadInTab() {
+  chrome.tabs.query({ url: ["*://*.x.com/*", "*://*.twitter.com/*"] }, (tabs) => {
+    const target = tabs.find(t => t.active) || tabs[0];
+    if (!target) {
+      addLog('info', '未找到 X 标签页，打开 X 首页等待登录/读取');
+      chrome.tabs.create({ url: 'https://x.com/home', active: true });
+      return;
+    }
+
+    chrome.tabs.sendMessage(target.id, { action: 'forceReadProfileBio' }, () => {
+      if (chrome.runtime.lastError) {
+        addLog('warn', `X 标签页未响应读取指令，刷新到 X 首页: ${chrome.runtime.lastError.message}`);
+        chrome.tabs.update(target.id, { url: 'https://x.com/home', active: true });
+      }
+    });
+  });
+}
+
+function maybeStartAgentAfterSetup(sendResponse) {
+  chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget', 'aiPersona', 'competitorReport'], (res) => {
+    const errors = getConfigErrors(res);
+    const ready = errors.length === 0 && hasPersona(res.aiPersona) && Boolean(res.competitorReport);
+    if (!ready) {
+      if (errors.length > 0) chrome.storage.local.set({ configErrors: errors });
+      sendResponse?.({ success: true, started: false, errors });
+      return;
+    }
+
+    chrome.storage.local.set({
+      isRunning: true,
+      isAutoPaused: false,
+      pauseReason: '',
+      setupAutoStartRequested: false,
+      configErrors: []
+    }, () => {
+      chrome.storage.local.remove(['configErrors']);
+      addLog('success', '策略配置完成，Agent 已自动启动');
+      sendResponse?.({ success: true, started: true });
+    });
+  });
 }
 
 // ==========================================
@@ -482,9 +585,10 @@ async function generateAIResponse(tweetContent) {
 
 async function analyzeAccountPersona(bio) {
   chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget'], async (config) => {
-    const errors = getConfigErrors(config);
+    const errors = getAIConnectionErrors(config);
     if (errors.length > 0) {
       addLog('warn', `配置不完整，无法分析账号画像：${errors.join('、')}`);
+      chrome.storage.local.set({ isAnalyzingPersona: false });
       return;
     }
     addLog('info', '开始 AI 账号画像分析...');
@@ -522,9 +626,10 @@ async function analyzeAccountPersona(bio) {
 
 async function analyzeCompetitors(persona) {
   chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget'], async (config) => {
-    const errors = getConfigErrors(config);
+    const errors = getAIConnectionErrors(config);
     if (errors.length > 0) {
       addLog('warn', `配置不完整，无法分析竞品：${errors.join('、')}`);
+      chrome.storage.local.set({ isAnalyzingCompetitors: false });
       return;
     }
     addLog('info', '开始竞品对标与爆款策略分析...');
@@ -548,6 +653,11 @@ async function analyzeCompetitors(persona) {
       
       chrome.storage.local.set({ competitorReport: report, isAnalyzingCompetitors: false }, () => {
          addLog('success', '竞品分析报告生成完成');
+         chrome.storage.local.get(['setupAutoStartRequested'], (res) => {
+            if (res.setupAutoStartRequested) {
+               maybeStartAgentAfterSetup(() => {});
+            }
+         });
          generateAutoDrafts();
       });
     } catch (e) {

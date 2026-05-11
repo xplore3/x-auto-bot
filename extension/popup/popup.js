@@ -31,7 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const missing = [];
         if (!result.apiKey) missing.push('API Key');
         if (!result.leadTarget) missing.push('引流目标');
-        if (result.apiProvider && result.apiProvider !== 'gemini' && !result.aiModel) missing.push('模型名称');
+        if ((result.apiProvider || 'gemini') !== 'gemini' && !result.aiModel) missing.push('模型名称');
         
         if (missing.length > 0) {
           statusText.textContent = `❌ 缺少: ${missing.join('、')}`;

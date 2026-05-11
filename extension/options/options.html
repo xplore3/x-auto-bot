@@ -17,6 +17,7 @@
         </div>
       </div>
       <nav>
+        <a href="#onboarding">启动向导</a>
         <a href="#strategy">定位策略</a>
         <a href="#model">模型连接</a>
         <a href="#publishing">发布节奏</a>
@@ -35,6 +36,27 @@
         </div>
         <button id="saveBtn" class="btn-primary">保存策略</button>
       </header>
+
+      <section class="panel setup-panel" id="onboarding">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Quick Start</p>
+            <h2>一键读取并分析 X 账号</h2>
+          </div>
+          <span class="panel-tag">Onboarding</span>
+        </div>
+
+        <div class="setup-layout">
+          <div>
+            <p class="setup-copy">登录 X 后，Agent 可以读取你的主页简介，用 AI 自动填写人设、目标用户和内容策略。你可以检查结果并继续手动修改。</p>
+            <div id="autoSetupStatus" class="setup-status">等待开始。请先确认 X 已登录，并填写 API Key。</div>
+          </div>
+          <div class="setup-actions">
+            <button id="analyzeProfileBtn" class="btn-primary" type="button">一键读取并分析</button>
+            <a href="https://x.com/home" target="_blank" class="btn-secondary">打开 X 登录</a>
+          </div>
+        </div>
+      </section>
 
       <section class="panel" id="strategy">
         <div class="panel-head">

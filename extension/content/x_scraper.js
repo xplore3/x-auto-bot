@@ -44,6 +44,7 @@ function setProfileProgress(stage, message, percent) {
 let scrollInterval = null;
 let restTimeout = null;
 let scrollCountInCycle = 0;
+let xLoginDetectedNotified = false;
 
 function startAutoScroll() {
   if (scrollInterval || restTimeout) return;
@@ -107,24 +108,51 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
       stopAutoScroll();
     }
   }
+  if (namespace === 'local' && changes.profileReadRequested?.newValue) {
+    ensureBioExtracted({ force: true });
+  }
 });
 
 // Initial check for auto-scroll
-chrome.storage.local.get(['isRunning'], (result) => {
+chrome.storage.local.get(['isRunning', 'profileReadRequested'], (result) => {
   if (result.isRunning) {
     startAutoScroll();
     ensureBioExtracted();
+  } else if (result.profileReadRequested) {
+    ensureBioExtracted({ force: true });
+  }
+});
+
+function notifyXLoginDetectedIfNeeded() {
+  if (xLoginDetectedNotified || !chrome.runtime?.id) return;
+  const profileLinkNode = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
+  if (!profileLinkNode) return;
+  xLoginDetectedNotified = true;
+  chrome.runtime.sendMessage({ action: 'xLoginDetected' }, () => {});
+}
+
+const loginDetectInterval = setInterval(() => {
+  notifyXLoginDetectedIfNeeded();
+  if (xLoginDetectedNotified) clearInterval(loginDetectInterval);
+}, 1500);
+setTimeout(() => clearInterval(loginDetectInterval), 30000);
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'forceReadProfileBio') {
+    ensureBioExtracted({ force: true });
+    sendResponse({ success: true });
   }
 });
 
 // ==========================================
 // Bio Extraction Logic with Progress Tracking
 // ==========================================
-function ensureBioExtracted() {
+function ensureBioExtracted(options = {}) {
   if (!chrome.runtime?.id) return;
+  const force = Boolean(options.force);
   chrome.storage.local.get(['accountBio', 'isRunning', 'profileReadProgress', 'isAutoPaused'], (result) => {
-    if (result.isAutoPaused) return;
-    if (!result.isRunning || result.accountBio) {
+    if (result.isAutoPaused && !force) return;
+    if ((!result.isRunning && !force) || (result.accountBio && !force)) {
       if (result.accountBio) {
         setProfileProgress('extracted', '主页简介已读取', 100);
       }
@@ -141,6 +169,16 @@ function ensureBioExtracted() {
       
       const profileLinkNode = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
       if (!profileLinkNode) {
+        if (force && checkCount > 12) {
+          addLog('warn', '未检测到 X 登录态，无法读取主页简介');
+          chrome.storage.local.set({
+            accountBio: '',
+            profileReadRequested: false
+          });
+          setProfileProgress('failed', '未检测到 X 登录态，请先登录 X 后重试', 0);
+          clearInterval(checkInterval);
+          return;
+        }
         if (checkCount % 3 === 0) {
           addLog('info', `等待 Profile 导航链接加载... (${checkCount}s)`);
         }
@@ -154,7 +192,7 @@ function ensureBioExtracted() {
         const bioNode = document.querySelector('div[data-testid="UserDescription"]');
         if (bioNode) {
           const bioText = bioNode.innerText.trim();
-          chrome.storage.local.set({ accountBio: bioText }, () => {
+          chrome.storage.local.set({ accountBio: bioText, profileReadRequested: false }, () => {
             addLog('success', `主页简介已提取: ${bioText.substring(0, 30)}...`);
             setProfileProgress('extracted', '主页简介已读取', 100);
           });
@@ -164,11 +202,11 @@ function ensureBioExtracted() {
         if (checkCount > 20) {
           const fallbackBio = document.querySelector('div[data-testid="UserDescription"]')?.innerText?.trim() || '';
           if (fallbackBio) {
-            chrome.storage.local.set({ accountBio: fallbackBio });
+            chrome.storage.local.set({ accountBio: fallbackBio, profileReadRequested: false });
             setProfileProgress('extracted', '主页简介已读取', 100);
           } else {
             addLog('warn', '在 Profile 页面等待简介超时，未读取到简介');
-            chrome.storage.local.set({ accountBio: '' });
+            chrome.storage.local.set({ accountBio: '', profileReadRequested: false });
             setProfileProgress('failed', '简介读取失败，可在策略中心手动填写人设', 0);
           }
           clearInterval(checkInterval);
@@ -182,7 +220,7 @@ function ensureBioExtracted() {
         }
         if (checkCount > 15) {
           addLog('warn', '等待 Profile 页面加载超时，跳过简介提取');
-          chrome.storage.local.set({ accountBio: '' });
+          chrome.storage.local.set({ accountBio: '', profileReadRequested: false });
           setProfileProgress('failed', '简介读取失败，可刷新 X 后重试或手动填写人设', 0);
           clearInterval(checkInterval);
         }

@@ -4,6 +4,7 @@ document.getElementById('saveBtnMirror').addEventListener('click', saveOptions);
 document.getElementById('apiProvider').addEventListener('change', toggleModelInput);
 document.getElementById('postScheduleMode').addEventListener('change', toggleScheduleMode);
 document.getElementById('testPostBtn').addEventListener('click', testPostNow);
+document.getElementById('analyzeProfileBtn').addEventListener('click', startAccountAutoSetup);
 
 const DEFAULT_TEST_POST = `AI副业别先找工具。
 
@@ -67,7 +68,8 @@ function showStatus(message, color = '#17bf63', timeout = 3000) {
   }, timeout);
 }
 
-function saveOptions() {
+function saveOptions(options = {}, afterSave) {
+  const silent = options && options.silent;
   const apiKey = document.getElementById('apiKey').value.trim();
   const apiProvider = document.getElementById('apiProvider').value;
   const aiModel = document.getElementById('aiModel').value.trim();
@@ -90,9 +92,9 @@ function saveOptions() {
   if (!apiKey) missing.push('API Key');
   if (!leadTarget) missing.push('引流目标');
   
-  if (missing.length > 0) {
+  if (!silent && missing.length > 0) {
     showStatus(`⚠️ 保存成功，但缺少关键配置：${missing.join('、')}，机器人可能无法正常运行。`, '#f5a623', 5000);
-  } else {
+  } else if (!silent) {
     showStatus('✅ 配置已成功保存！');
   }
 
@@ -118,8 +120,72 @@ function saveOptions() {
       testPostText
     }, () => {
       chrome.runtime.sendMessage({ action: 'queueUpdated' }, () => {});
+      chrome.runtime.sendMessage({ action: 'maybeStartAgentAfterSetup' }, (response) => {
+        if (!silent && response?.started) {
+          showStatus('✅ 策略已保存，Agent 已自动启动。', '#17bf63', 5000);
+        }
+      });
+      if (typeof afterSave === 'function') afterSave();
     });
   });
+}
+
+function startAccountAutoSetup() {
+  const apiKey = document.getElementById('apiKey').value.trim();
+  if (!apiKey) {
+    setSetupStatus('请先填写并保存 API Key，然后再启动 AI 自动分析。', 'error');
+    showStatus('⚠️ 一键分析需要 API Key。', '#f5a623', 4000);
+    return;
+  }
+
+  setSetupStatus('正在保存当前表单，并准备读取 X 账号...', 'running');
+  saveOptions({ silent: true }, () => {
+    chrome.runtime.sendMessage({ action: 'startAccountAutoSetup' }, (response) => {
+      if (chrome.runtime.lastError) {
+        setSetupStatus(`启动失败：${chrome.runtime.lastError.message}`, 'error');
+        return;
+      }
+      if (!response || !response.success) {
+        setSetupStatus(`启动失败：${response?.error || '未知错误'}`, 'error');
+        return;
+      }
+      setSetupStatus(response.message || '已开始读取并分析账号。', 'running');
+      showStatus('✅ 已开始读取 X 账号并自动分析。', '#17bf63', 5000);
+    });
+  });
+}
+
+function setSetupStatus(message, state = '') {
+  const el = document.getElementById('autoSetupStatus');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.remove('running', 'success', 'error');
+  if (state) el.classList.add(state);
+}
+
+function setValueIfNotFocused(id, value) {
+  const el = document.getElementById(id);
+  if (!el || document.activeElement === el) return;
+  el.value = value || '';
+}
+
+function updateSetupStatusFromStorage(items) {
+  const progress = items.profileReadProgress || {};
+  if (items.isAnalyzingCompetitors) {
+    setSetupStatus('账号画像已生成，正在分析竞品和爆款框架...', 'running');
+  } else if (items.isAnalyzingPersona) {
+    setSetupStatus('已读取 X 账号，正在用 AI 生成人设和目标用户...', 'running');
+  } else if (items.isGenerating) {
+    setSetupStatus('策略已生成，正在准备内容草稿...', 'running');
+  } else if (progress.stage === 'failed') {
+    setSetupStatus(progress.message || '读取失败，请确认 X 已登录后重试。', 'error');
+  } else if (items.competitorReport) {
+    setSetupStatus(items.isRunning ? '设置已完成，Agent 正在运行。' : '分析已完成并自动保存，你可以检查后保存启动。', 'success');
+  } else if (progress.message) {
+    setSetupStatus(progress.message, progress.stage === 'extracted' ? 'success' : 'running');
+  } else {
+    setSetupStatus('等待开始。请先确认 X 已登录，并填写 API Key。');
+  }
 }
 
 function testPostNow() {
@@ -158,7 +224,13 @@ function restoreOptions() {
     postInterval: 30,
     aiPersona: { targetUsers: '', characteristics: '', goals: '' },
     competitorReport: '',
-    testPostText: DEFAULT_TEST_POST
+    testPostText: DEFAULT_TEST_POST,
+    accountBio: '',
+    profileReadProgress: null,
+    isAnalyzingPersona: false,
+    isAnalyzingCompetitors: false,
+    isGenerating: false,
+    isRunning: false
   }, (items) => {
     document.getElementById('apiKey').value = items.apiKey;
     document.getElementById('apiProvider').value = items.apiProvider;
@@ -182,5 +254,29 @@ function restoreOptions() {
     document.getElementById('aiGoals').value = items.aiPersona.goals || '';
     document.getElementById('competitorReport').value = items.competitorReport || '';
     document.getElementById('testPostText').value = items.testPostText || DEFAULT_TEST_POST;
+    updateSetupStatusFromStorage(items);
   });
 }
+
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace !== 'local') return;
+
+  if (changes.aiPersona?.newValue) {
+    const persona = changes.aiPersona.newValue || {};
+    setValueIfNotFocused('aiTargetUsers', persona.targetUsers || '');
+    setValueIfNotFocused('aiCharacteristics', persona.characteristics || '');
+    setValueIfNotFocused('aiGoals', persona.goals || '');
+  }
+  if (changes.competitorReport) {
+    setValueIfNotFocused('competitorReport', changes.competitorReport.newValue || '');
+  }
+
+  chrome.storage.local.get([
+    'profileReadProgress',
+    'isAnalyzingPersona',
+    'isAnalyzingCompetitors',
+    'isGenerating',
+    'isRunning',
+    'competitorReport'
+  ], updateSetupStatusFromStorage);
+});
