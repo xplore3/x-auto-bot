@@ -1,10 +1,4 @@
-document.addEventListener('DOMContentLoaded', restoreOptions);
-document.getElementById('saveBtn').addEventListener('click', saveOptions);
-document.getElementById('saveBtnMirror').addEventListener('click', saveOptions);
-document.getElementById('apiProvider').addEventListener('change', toggleModelInput);
-document.getElementById('postScheduleMode').addEventListener('change', toggleScheduleMode);
-document.getElementById('testPostBtn').addEventListener('click', testPostNow);
-document.getElementById('analyzeProfileBtn').addEventListener('click', startAccountAutoSetup);
+document.addEventListener('DOMContentLoaded', initOptions);
 
 const DEFAULT_TEST_POST = `AI副业别先找工具。
 
@@ -32,6 +26,22 @@ const DEFAULT_AGENT_MEMORY = {
   replyStrategy: '',
   sourceInputs: '',
   weeklyReviewSignals: ''
+};
+
+const DEFAULT_ONBOARDING_STRATEGY = {
+  sourceInput: '',
+  accountUse: 'brand',
+  audience: ['founders', 'indie'],
+  audienceCustom: '',
+  content: ['insights', 'playbooks'],
+  contentCustom: '',
+  contentMode: 'balanced',
+  postStyle: 'concise',
+  preferredLanguage: 'zh-CN',
+  targetTimezone: 'Asia/Shanghai',
+  growthGoal: '首月新增 1000 粉丝',
+  automationMode: 'review',
+  firstTweetText: ''
 };
 
 const AGENT_MEMORY_FIELD_IDS = {
@@ -67,17 +77,167 @@ const PROVIDER_HELP = {
   deepseek: 'DeepSeek 最新模型：<code>deepseek-v4-flash</code>（轻量高速）、<code>deepseek-v4-pro</code>（最强能力）。'
 };
 
+const ACCOUNT_USE_LABELS = {
+  brand: '官方品牌账号',
+  evangelist: '首席推销官',
+  curator: '赛道观察家',
+  kol: '赛道 KOL'
+};
+
+const AUDIENCE_LABELS = {
+  founders: '创始人 / CEO',
+  indie: '独立开发者',
+  global: '出海从业者',
+  aiBuilders: 'AI 工具人',
+  researchers: '投资 / 研究人员'
+};
+
+const CONTENT_LABELS = {
+  insights: '行业观点',
+  playbooks: '实操干货',
+  stories: '幕后故事',
+  curation: '信息转译',
+  softPromo: '产品软推广'
+};
+
+const STYLE_LABELS = {
+  concise: '极简利落流',
+  story: '故事悬念流',
+  contrarian: '观点对抗流'
+};
+
+const LANGUAGE_LABELS = {
+  en: '英语',
+  ja: '日语',
+  ko: '韩语',
+  'zh-CN': '简体中文',
+  'zh-TW': '繁体中文'
+};
+
+const LANGUAGE_TIMEZONE_DEFAULTS = {
+  en: 'America/Los_Angeles',
+  ja: 'Asia/Tokyo',
+  ko: 'Asia/Seoul',
+  'zh-CN': 'Asia/Shanghai',
+  'zh-TW': 'Asia/Shanghai'
+};
+
+const TIMEZONE_SCHEDULES = {
+  'Asia/Shanghai': '9-11,12-14,20-23',
+  'America/Los_Angeles': '7-9,12-14,18-22',
+  'America/New_York': '8-10,12-14,19-22',
+  'Europe/London': '8-10,12-14,18-21',
+  'Asia/Tokyo': '8-10,12-14,19-22',
+  'Asia/Seoul': '8-10,12-14,19-22'
+};
+
+const CONTENT_MODE_PLANS = {
+  balanced: {
+    postsPerDay: 5,
+    label: '每天 5 条',
+    mix: '40% 共鸣传播 / 40% 专业深度 / 20% 产品软推广'
+  },
+  growth: {
+    postsPerDay: 7,
+    label: '每天 7 条',
+    mix: '55% 传播钩子 / 30% 干货 / 15% 转化'
+  },
+  trust: {
+    postsPerDay: 3,
+    label: '每天 3 条',
+    mix: '25% 共鸣 / 55% 深度 / 20% 案例转化'
+  }
+};
+
+const ANALYSIS_MESSAGES = [
+  '正在解析产品卖点...',
+  '正在识别目标用户...',
+  '正在推演内容支柱...',
+  '正在生成爆款风格样本...',
+  '正在组装长期记忆...'
+];
+
+let analysisTimer = null;
+let analysisStartedAt = 0;
+
+function initOptions() {
+  bind('saveBtn', 'click', saveOptions);
+  bind('saveBtnMirror', 'click', saveOptions);
+  bind('apiProvider', 'change', toggleModelInput);
+  bind('postScheduleMode', 'change', toggleScheduleMode);
+  bind('testPostBtn', 'click', testPostNow);
+  bind('analyzeProfileBtn', 'click', startAccountAutoSetup);
+  bind('analyzeSourceBtn', 'click', analyzeSourceNow);
+  bind('buildPlanBtn', 'click', buildGrowthPlan);
+  bind('applyPlanBtn', 'click', applyPlanToAgent);
+  bind('firstActionPostBtn', 'click', postFirstActionTweet);
+  bind('targetTimezone', 'change', updatePlanPreview);
+  bind('growthGoal', 'input', updatePlanPreview);
+  initChoiceCards();
+  restoreOptions();
+}
+
+function bind(id, event, handler) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener(event, handler);
+}
+
+function initChoiceCards() {
+  document.querySelectorAll('[data-choice-group]').forEach((button) => {
+    button.addEventListener('click', () => {
+      selectChoice(button.dataset.choiceGroup, button.dataset.value);
+      if (button.dataset.choiceGroup === 'preferredLanguage') {
+        const timezone = LANGUAGE_TIMEZONE_DEFAULTS[button.dataset.value];
+        if (timezone) document.getElementById('targetTimezone').value = timezone;
+      }
+      updatePlanPreview();
+    });
+  });
+
+  document.querySelectorAll('[data-choice-multi]').forEach((button) => {
+    button.addEventListener('click', () => {
+      setButtonSelected(button, !button.classList.contains('is-selected'));
+      updatePlanPreview();
+    });
+  });
+}
+
+function setButtonSelected(button, selected) {
+  button.classList.toggle('is-selected', selected);
+  button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+}
+
+function selectChoice(group, value) {
+  document.querySelectorAll(`[data-choice-group="${group}"]`).forEach((button) => {
+    setButtonSelected(button, button.dataset.value === value);
+  });
+}
+
+function setMultiChoices(group, values = []) {
+  const valueSet = new Set(values);
+  document.querySelectorAll(`[data-choice-multi="${group}"]`).forEach((button) => {
+    setButtonSelected(button, valueSet.has(button.dataset.value));
+  });
+}
+
+function getChoiceValue(group, fallback = '') {
+  return document.querySelector(`[data-choice-group="${group}"].is-selected`)?.dataset.value || fallback;
+}
+
+function getMultiChoiceValues(group) {
+  return Array.from(document.querySelectorAll(`[data-choice-multi="${group}"].is-selected`))
+    .map(button => button.dataset.value);
+}
+
 function toggleModelInput() {
   const provider = document.getElementById('apiProvider').value;
   const modelGroup = document.getElementById('modelGroup');
   const modelInput = document.getElementById('aiModel');
   const helpText = document.getElementById('modelHelpText');
-  
   const config = PROVIDER_DEFAULTS[provider] || PROVIDER_DEFAULTS.gemini;
   
   modelGroup.style.display = config.showModel ? 'block' : 'none';
   
-  // 如果当前输入框是空值或者是其他 provider 的默认值，则替换为当前 provider 的默认值
   const currentVal = modelInput.value.trim();
   const allDefaults = Object.values(PROVIDER_DEFAULTS).map(p => p.model);
   if (!currentVal || allDefaults.includes(currentVal)) {
@@ -106,39 +266,121 @@ function showStatus(message, color = '#17bf63', timeout = 3000) {
   }, timeout);
 }
 
+function getOnboardingStrategyFromForm() {
+  return {
+    sourceInput: document.getElementById('sourceInput')?.value.trim() || '',
+    accountUse: getChoiceValue('accountUse', DEFAULT_ONBOARDING_STRATEGY.accountUse),
+    audience: getMultiChoiceValues('audience'),
+    audienceCustom: document.getElementById('audienceCustom')?.value.trim() || '',
+    content: getMultiChoiceValues('content'),
+    contentCustom: document.getElementById('contentCustom')?.value.trim() || '',
+    contentMode: getChoiceValue('contentMode', DEFAULT_ONBOARDING_STRATEGY.contentMode),
+    postStyle: getChoiceValue('postStyle', DEFAULT_ONBOARDING_STRATEGY.postStyle),
+    preferredLanguage: getChoiceValue('preferredLanguage', DEFAULT_ONBOARDING_STRATEGY.preferredLanguage),
+    targetTimezone: document.getElementById('targetTimezone')?.value || DEFAULT_ONBOARDING_STRATEGY.targetTimezone,
+    growthGoal: document.getElementById('growthGoal')?.value.trim() || DEFAULT_ONBOARDING_STRATEGY.growthGoal,
+    automationMode: getChoiceValue('automationMode', DEFAULT_ONBOARDING_STRATEGY.automationMode),
+    firstTweetText: document.getElementById('firstTweetPreview')?.value.trim() || ''
+  };
+}
+
+function applyOnboardingStrategy(strategy = {}) {
+  const merged = { ...DEFAULT_ONBOARDING_STRATEGY, ...(strategy || {}) };
+  document.getElementById('sourceInput').value = merged.sourceInput || '';
+  document.getElementById('audienceCustom').value = merged.audienceCustom || '';
+  document.getElementById('contentCustom').value = merged.contentCustom || '';
+  document.getElementById('targetTimezone').value = merged.targetTimezone || DEFAULT_ONBOARDING_STRATEGY.targetTimezone;
+  document.getElementById('growthGoal').value = merged.growthGoal || DEFAULT_ONBOARDING_STRATEGY.growthGoal;
+  document.getElementById('firstTweetPreview').value = merged.firstTweetText || '';
+  selectChoice('accountUse', merged.accountUse);
+  setMultiChoices('audience', merged.audience);
+  setMultiChoices('content', merged.content);
+  selectChoice('contentMode', merged.contentMode);
+  selectChoice('postStyle', merged.postStyle);
+  selectChoice('preferredLanguage', merged.preferredLanguage);
+  selectChoice('automationMode', merged.automationMode);
+  updatePlanPreview();
+}
+
+function labelList(values, labels) {
+  return values.map(value => labels[value]).filter(Boolean);
+}
+
+function splitCustomInput(text) {
+  return text
+    .split(/[,，、\n]/)
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function getAudienceLabels(strategy) {
+  return [...labelList(strategy.audience, AUDIENCE_LABELS), ...splitCustomInput(strategy.audienceCustom)];
+}
+
+function getContentLabels(strategy) {
+  return [...labelList(strategy.content, CONTENT_LABELS), ...splitCustomInput(strategy.contentCustom)];
+}
+
+function createPlan(strategy) {
+  const modePlan = CONTENT_MODE_PLANS[strategy.contentMode] || CONTENT_MODE_PLANS.balanced;
+  const schedule = TIMEZONE_SCHEDULES[strategy.targetTimezone] || TIMEZONE_SCHEDULES['Asia/Shanghai'];
+  return {
+    postsPerDay: modePlan.postsPerDay,
+    postCountLabel: modePlan.label,
+    schedule,
+    mix: modePlan.mix,
+    growthGoal: strategy.growthGoal || DEFAULT_ONBOARDING_STRATEGY.growthGoal
+  };
+}
+
+function updatePlanPreview() {
+  const strategy = getOnboardingStrategyFromForm();
+  const plan = createPlan(strategy);
+  setText('planPostCount', plan.postCountLabel);
+  setText('planSchedule', plan.schedule);
+  setText('planGrowthGoal', plan.growthGoal);
+}
+
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
 function saveOptions(options = {}, afterSave) {
   const silent = options && options.silent;
+  const skipAutoStart = options && options.skipAutoStart;
+  syncWizardToFields({ overwrite: false });
+
   const apiKey = document.getElementById('apiKey').value.trim();
   const apiProvider = document.getElementById('apiProvider').value;
   const aiModel = document.getElementById('aiModel').value.trim();
   const targetUsers = document.getElementById('targetUsers').value;
   const promptTemplate = document.getElementById('promptTemplate').value;
   const leadTarget = document.getElementById('leadTarget').value.trim();
-  const postsPerDay = parseInt(document.getElementById('postsPerDay').value, 10) || 10;
+  const postsPerDay = parseInt(document.getElementById('postsPerDay').value, 10) || 5;
   const postScheduleMode = document.getElementById('postScheduleMode').value;
   const smartTimeSlots = document.getElementById('smartTimeSlots').value.trim();
   const postInterval = parseInt(document.getElementById('postInterval').value, 10) || 30;
-  
   const aiTargetUsers = document.getElementById('aiTargetUsers').value;
   const aiCharacteristics = document.getElementById('aiCharacteristics').value;
   const aiGoals = document.getElementById('aiGoals').value;
   const competitorReport = document.getElementById('competitorReport').value;
   const testPostText = document.getElementById('testPostText').value.trim();
+  const onboardingStrategy = getOnboardingStrategyFromForm();
   const agentMemory = getAgentMemoryFromForm();
 
-  // 基础配置校验
   const missing = [];
   if (!apiKey) missing.push('API Key');
   if (!leadTarget) missing.push('引流目标');
   
   if (!silent && missing.length > 0) {
-    showStatus(`⚠️ 保存成功，但缺少关键配置：${missing.join('、')}，机器人可能无法正常运行。`, '#f5a623', 5000);
+    showStatus(`保存成功，但缺少关键配置：${missing.join('、')}。`, '#f5a623', 5000);
   } else if (!silent) {
-    showStatus('✅ 长期记忆已保存！');
+    showStatus('Agent 记忆与计划已保存。');
   }
 
   chrome.storage.local.get(['aiPersona'], (result) => {
-    let persona = result.aiPersona || {};
+    const persona = result.aiPersona || {};
     persona.targetUsers = aiTargetUsers;
     persona.characteristics = aiCharacteristics;
     persona.goals = aiGoals;
@@ -156,30 +398,340 @@ function saveOptions(options = {}, afterSave) {
       postInterval,
       aiPersona: persona,
       agentMemory,
+      onboardingStrategy,
       competitorReport,
       testPostText
     }, () => {
       chrome.runtime.sendMessage({ action: 'queueUpdated' }, () => {});
-      chrome.runtime.sendMessage({ action: 'maybeStartAgentAfterSetup' }, (response) => {
-        if (!silent && response?.started) {
-          showStatus('✅ 长期记忆已保存，Agent 已自动启动。', '#17bf63', 5000);
-        }
-      });
+      if (!skipAutoStart) {
+        chrome.runtime.sendMessage({ action: 'maybeStartAgentAfterSetup' }, (response) => {
+          if (!silent && response?.started) {
+            showStatus('Agent 已按当前计划自动启动。', '#17bf63', 5000);
+          }
+        });
+      }
       if (typeof afterSave === 'function') afterSave();
     });
   });
+}
+
+function syncWizardToFields(options = {}) {
+  const overwrite = options.overwrite !== false;
+  const strategy = getOnboardingStrategyFromForm();
+  const plan = createPlan(strategy);
+  const audience = getAudienceLabels(strategy);
+  const content = getContentLabels(strategy);
+  const role = ACCOUNT_USE_LABELS[strategy.accountUse] || ACCOUNT_USE_LABELS.brand;
+  const style = STYLE_LABELS[strategy.postStyle] || STYLE_LABELS.concise;
+  const language = LANGUAGE_LABELS[strategy.preferredLanguage] || LANGUAGE_LABELS['zh-CN'];
+  const source = strategy.sourceInput || '尚未输入来源';
+  const firstTweet = strategy.firstTweetText || composeFirstTweet(strategy);
+
+  document.getElementById('postsPerDay').value = plan.postsPerDay;
+  document.getElementById('postScheduleMode').value = 'smart';
+  document.getElementById('smartTimeSlots').value = plan.schedule;
+  toggleScheduleMode();
+
+  setFieldValue('leadTarget', `我会围绕 ${content.join('、') || 'AI、出海和个人商业化'} 持续分享可执行的观点和案例，帮助 ${audience.join('、') || '目标用户'} 更快建立判断和行动。`, overwrite);
+  setFieldValue('aiTargetUsers', audience.join('\n'), overwrite);
+  setFieldValue('aiGoals', `${strategy.growthGoal || '首月新增 1000 粉丝'}；用 ${role} 的方式建立信任、获取关注、沉淀潜在客户，并把日常输入转化为稳定内容输出。`, overwrite);
+  setFieldValue('aiCharacteristics', `语言：${language}\n账号角色：${role}\n默认文案流派：${style}\n内容配比：${plan.mix}\n表达要具体、可信、有判断力，避免空泛鸡血。`, overwrite);
+  setFieldValue('targetUsers', extractSourceHandles(source), overwrite);
+  setFieldValue('testPostText', firstTweet, overwrite);
+  setFieldValue('firstTweetPreview', firstTweet, overwrite);
+
+  const memory = {
+    identity: `来源：${source}\n账号角色：${role}\n目标：${strategy.growthGoal || DEFAULT_ONBOARDING_STRATEGY.growthGoal}`,
+    marketPosition: `${role}，用 ${style} 的表达方式，在 ${content.join('、') || '核心赛道'} 中建立清晰、可信、可持续的 X 影响力。`,
+    audienceSegments: audience.join('\n'),
+    audiencePains: buildAudiencePains(strategy),
+    contentPillars: content.join('\n'),
+    contentAngles: buildContentAngles(strategy),
+    proofAssets: '优先使用可验证的产品进展、用户反馈、真实案例、公开数据和亲历复盘；没有证据时用观察/假设措辞。',
+    personalStories: '持续收集：产品构建过程、客户问题、失败复盘、增长实验、行业观察。',
+    coreOpinions: buildCoreOpinions(strategy),
+    boundaries: '不做擦边内容；不碰政治动员；不承诺投资收益；不编造履历、客户和数据；不刷屏；不诱导私信轰炸。',
+    voiceRules: buildVoiceRules(strategy),
+    bannedClaims: '禁止“稳赚”“保证涨粉”“保证成交”“内部消息”“无风险收益”等不可验证承诺。',
+    interactionTargets: audience.join('\n'),
+    replyStrategy: buildReplyStrategy(strategy),
+    sourceInputs: source,
+    weeklyReviewSignals: '每周复盘：涨粉来源、回复率、收藏率、转发率、评论带来的关注、误解或争议点、可复用选题。'
+  };
+
+  Object.entries(memory).forEach(([key, value]) => {
+    setFieldValue(AGENT_MEMORY_FIELD_IDS[key], value, overwrite);
+  });
+
+  setFieldValue('promptTemplate', buildPromptTemplate(strategy), overwrite);
+  updatePlanPreview();
+}
+
+function setFieldValue(id, value, overwrite = true) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (overwrite || !el.value.trim()) el.value = value || '';
+}
+
+function extractSourceHandles(source) {
+  const handles = [];
+  const xMatch = source.match(/x\.com\/([A-Za-z0-9_]{1,15})/i) || source.match(/twitter\.com\/([A-Za-z0-9_]{1,15})/i);
+  if (xMatch?.[1]) handles.push(xMatch[1]);
+  const atMatch = source.match(/@([A-Za-z0-9_]{1,15})/);
+  if (atMatch?.[1]) handles.push(atMatch[1]);
+  return [...new Set(handles)].join('\n');
+}
+
+function buildAudiencePains(strategy) {
+  const base = [
+    '有想法但输出不稳定',
+    '会刷 X 但不会把输入转化成观点和内容',
+    '想做 KOL 但缺少定位、素材库和持续发布节奏'
+  ];
+  if (strategy.audience.includes('founders')) base.push('创始人需要在增长、融资、产品方向上建立可信表达');
+  if (strategy.audience.includes('indie')) base.push('独立开发者需要低成本冷启动和持续获客');
+  if (strategy.audience.includes('global')) base.push('出海从业者需要跨文化渠道、案例和转化路径');
+  if (strategy.audience.includes('aiBuilders')) base.push('AI 工具人需要更具体的工作流、自动化和交付结果');
+  if (strategy.audience.includes('researchers')) base.push('研究/投资人需要趋势判断、结构化信息和反共识观点');
+  return base.join('\n');
+}
+
+function buildContentAngles(strategy) {
+  const lines = [];
+  if (strategy.postStyle === 'concise') lines.push('清单式：3 个工具、5 个步骤、1 个判断。');
+  if (strategy.postStyle === 'story') lines.push('故事式：起因、转折、发现、可复制经验。');
+  if (strategy.postStyle === 'contrarian') lines.push('反常识式：先给明确判断，再解释为什么大多数人做错。');
+  lines.push('低粉爆款优先：具体场景、强钩子、少废话、可转发的结论。');
+  lines.push(`内容配比：${(CONTENT_MODE_PLANS[strategy.contentMode] || CONTENT_MODE_PLANS.balanced).mix}`);
+  return lines.join('\n');
+}
+
+function buildCoreOpinions(strategy) {
+  const content = getContentLabels(strategy).join('、') || 'AI、出海、增长和个人商业化';
+  return [
+    `做 X 影响力不是随机发帖，而是围绕 ${content} 持续输出可验证的判断。`,
+    '工具本身不值钱，能降低成本、提高转化或创造新分发才值钱。',
+    '涨粉不是目的，建立信任和可重复的内容系统才是长期资产。'
+  ].join('\n');
+}
+
+function buildVoiceRules(strategy) {
+  const language = LANGUAGE_LABELS[strategy.preferredLanguage] || LANGUAGE_LABELS['zh-CN'];
+  const style = STYLE_LABELS[strategy.postStyle] || STYLE_LABELS.concise;
+  const lines = [`优先使用${language}。`, `默认采用${style}。`, '先结论后解释；少形容词，多具体例子；每条内容只表达一个核心观点。'];
+  if (strategy.accountUse === 'brand') lines.push('品牌号保持专业、克制，避免过强个人情绪。');
+  if (strategy.accountUse === 'evangelist') lines.push('首席推销官可以更有热情，但必须用事实和案例支撑。');
+  if (strategy.accountUse === 'curator') lines.push('观察家要多总结、多转译、多补充判断。');
+  if (strategy.accountUse === 'kol') lines.push('KOL 要敢给判断，但避免攻击个人。');
+  return lines.join('\n');
+}
+
+function buildReplyStrategy(strategy) {
+  const audience = getAudienceLabels(strategy).join('、') || '目标用户';
+  return `优先回复 ${audience} 关注的话题。结构：先补充一个具体判断，再给一个经验/例子/反问；只在上下文自然相关时带行动入口，不硬广，不刷屏。`;
+}
+
+function buildPromptTemplate(strategy) {
+  return `你是一个 X 个人发声 Agent。请根据推文内容，生成一条短评论。
+要求：
+1. 不超过 60 个中文字符，或目标语言下同等长度。
+2. 符合账号角色、目标用户和长期记忆。
+3. 先提供观点或补充，不要生硬广告。
+4. 只有在上下文自然相关时，才轻量提及引流信息。
+
+【推文】：{tweet}
+【引流信息】：{leadTarget}
+
+回复：`;
+}
+
+function composeFirstTweet(strategy) {
+  const content = getContentLabels(strategy);
+  const audience = getAudienceLabels(strategy);
+  const sourceLine = strategy.sourceInput ? `\n\n我会以 ${strategy.sourceInput} 为起点，持续记录真实观察。` : '';
+  if (strategy.postStyle === 'story') {
+    return `很多人想在 X 上建立影响力，但第一步就做错了。
+
+他们先问“我该发什么”，却没有先定义：
+谁需要我？
+他们为什么关注我？
+我能持续提供什么判断？
+
+接下来我会围绕 ${content.join('、') || 'AI、出海和增长'}，把输入变成稳定输出。${sourceLine}`;
+  }
+  if (strategy.postStyle === 'contrarian') {
+    return `大多数账号做不起来，不是因为不会写。
+
+而是没有内容系统：
+目标用户不清楚
+观点资产没沉淀
+互动对象不聚焦
+发布节奏不稳定
+
+我接下来会围绕 ${audience.join('、') || '创始人和独立开发者'}，公开测试一套 X 发声系统。`;
+  }
+  return `想把 X 做起来，别先追热点。
+
+先搭 3 个东西：
+1. 明确目标用户
+2. 沉淀长期观点
+3. 固定内容配比和发布时间
+
+我接下来会围绕 ${content.join('、') || 'AI、出海和搞钱'}，持续输出可执行的观察。`;
+}
+
+function buildGrowthPlan(options = {}) {
+  const strategy = getOnboardingStrategyFromForm();
+  const plan = createPlan(strategy);
+  const overwrite = options.overwrite !== false;
+  startPlanProgress();
+  setTimeout(() => {
+    syncWizardToFields({ overwrite });
+    document.getElementById('firstTweetPreview').value = strategy.firstTweetText || composeFirstTweet(strategy);
+    document.getElementById('testPostText').value = document.getElementById('firstTweetPreview').value;
+    setSetupStatus(`计划已生成：${plan.postCountLabel}，${plan.schedule} 发布，目标 ${plan.growthGoal}。`, 'success');
+    stopPlanProgress('涨粉计划已生成，可应用到 Agent 记忆。', 'success');
+    updatePlanPreview();
+  }, 800);
+}
+
+function startPlanProgress() {
+  const el = document.getElementById('growthPlanStatus');
+  if (!el) return;
+  el.textContent = '正在制定涨粉计划... 0s / 60s';
+  el.classList.remove('success', 'error');
+  el.classList.add('running');
+}
+
+function stopPlanProgress(message, state = '') {
+  const el = document.getElementById('growthPlanStatus');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.remove('running', 'success', 'error');
+  if (state) el.classList.add(state);
+}
+
+function applyPlanToAgent() {
+  syncWizardToFields({ overwrite: true });
+  saveOptions({ silent: true, skipAutoStart: true }, () => {
+    showStatus('已把向导选择写入长期记忆。', '#17bf63', 4000);
+    stopPlanProgress('已应用到 Agent 记忆，可以测试发帖或启动。', 'success');
+  });
+}
+
+function postFirstActionTweet() {
+  const firstTweet = document.getElementById('firstTweetPreview').value.trim() || composeFirstTweet(getOnboardingStrategyFromForm());
+  document.getElementById('testPostText').value = firstTweet;
+  saveOptions({ silent: true, skipAutoStart: true }, () => testPostNow());
+}
+
+function analyzeSourceNow() {
+  const sourceInput = document.getElementById('sourceInput').value.trim();
+  if (!sourceInput) {
+    setSetupStatus('请先输入产品网站、X 主页、竞品网站或希望模仿的账号。', 'error');
+    return;
+  }
+
+  startAnalysisProgress('AI 正在进行分析...');
+  saveOptions({ silent: true, skipAutoStart: true }, () => {
+    chrome.runtime.sendMessage({ action: 'analyzeOnboardingSource', sourceInput }, (response) => {
+      if (chrome.runtime.lastError || !response?.success) {
+        const fallback = createFallbackAnalysis(sourceInput);
+        applySourceAnalysis(fallback);
+        stopAnalysisProgress('未连接 AI，已用本地策略模板生成初稿。', 'success');
+        showStatus('已生成本地策略初稿；填写 API Key 后可进行 AI 深度分析。', '#f5a623', 5000);
+        return;
+      }
+
+      applySourceAnalysis(response.analysis || createFallbackAnalysis(sourceInput));
+      stopAnalysisProgress('AI 分析完成，请确认下面的卡片选择。', 'success');
+      showStatus('AI 分析完成，已自动填入建议。');
+    });
+  });
+}
+
+function startAnalysisProgress(message) {
+  clearInterval(analysisTimer);
+  analysisStartedAt = Date.now();
+  setText('sourceAnalysisStatus', message);
+  document.getElementById('sourceAnalysisProgress').style.width = '8%';
+  document.getElementById('analysisTimer').textContent = '0s / 60s';
+  analysisTimer = setInterval(() => {
+    const seconds = Math.min(60, Math.floor((Date.now() - analysisStartedAt) / 1000));
+    const percent = Math.min(92, 8 + seconds * 1.4);
+    document.getElementById('analysisTimer').textContent = `${seconds}s / 60s`;
+    document.getElementById('sourceAnalysisProgress').style.width = `${percent}%`;
+    setText('sourceAnalysisStatus', ANALYSIS_MESSAGES[seconds % ANALYSIS_MESSAGES.length]);
+  }, 1000);
+}
+
+function stopAnalysisProgress(message, state = '') {
+  clearInterval(analysisTimer);
+  analysisTimer = null;
+  document.getElementById('sourceAnalysisProgress').style.width = state === 'error' ? '20%' : '100%';
+  document.getElementById('analysisTimer').textContent = state === 'error' ? '--' : `${Math.min(60, Math.floor((Date.now() - analysisStartedAt) / 1000))}s / 60s`;
+  setSetupStatus(message, state);
+}
+
+function applySourceAnalysis(analysis) {
+  if (!analysis) return;
+  const strategy = {
+    ...getOnboardingStrategyFromForm(),
+    sourceInput: analysis.sourceInput || document.getElementById('sourceInput').value.trim(),
+    accountUse: analysis.accountUse || getOnboardingStrategyFromForm().accountUse,
+    audience: Array.isArray(analysis.audience) && analysis.audience.length ? analysis.audience : getOnboardingStrategyFromForm().audience,
+    audienceCustom: analysis.audienceCustom || getOnboardingStrategyFromForm().audienceCustom,
+    content: Array.isArray(analysis.content) && analysis.content.length ? analysis.content : getOnboardingStrategyFromForm().content,
+    contentCustom: analysis.contentCustom || getOnboardingStrategyFromForm().contentCustom,
+    contentMode: analysis.contentMode || getOnboardingStrategyFromForm().contentMode,
+    postStyle: analysis.postStyle || getOnboardingStrategyFromForm().postStyle,
+    preferredLanguage: analysis.preferredLanguage || getOnboardingStrategyFromForm().preferredLanguage,
+    targetTimezone: analysis.targetTimezone || getOnboardingStrategyFromForm().targetTimezone,
+    growthGoal: analysis.growthGoal || getOnboardingStrategyFromForm().growthGoal,
+    automationMode: analysis.automationMode || getOnboardingStrategyFromForm().automationMode,
+    firstTweetText: analysis.firstTweetText || getOnboardingStrategyFromForm().firstTweetText
+  };
+  applyOnboardingStrategy(strategy);
+
+  if (analysis.persona) {
+    setFieldValue('aiTargetUsers', analysis.persona.targetUsers || '', true);
+    setFieldValue('aiCharacteristics', analysis.persona.characteristics || '', true);
+    setFieldValue('aiGoals', analysis.persona.goals || '', true);
+  }
+  if (analysis.memory) fillAgentMemory(analysis.memory, false);
+  if (analysis.leadTarget) setFieldValue('leadTarget', analysis.leadTarget, true);
+  if (analysis.competitorReport) setFieldValue('competitorReport', analysis.competitorReport, true);
+
+  syncWizardToFields({ overwrite: false });
+  buildGrowthPlan({ overwrite: false });
+}
+
+function createFallbackAnalysis(sourceInput) {
+  const looksLikeX = /(?:x|twitter)\.com\/|^@?[A-Za-z0-9_]{1,15}$/.test(sourceInput);
+  return {
+    sourceInput,
+    accountUse: looksLikeX ? 'kol' : 'evangelist',
+    audience: looksLikeX ? ['founders', 'aiBuilders'] : ['founders', 'indie', 'global'],
+    content: looksLikeX ? ['insights', 'curation', 'playbooks'] : ['insights', 'playbooks', 'stories', 'softPromo'],
+    contentMode: 'balanced',
+    postStyle: looksLikeX ? 'contrarian' : 'concise',
+    preferredLanguage: 'zh-CN',
+    targetTimezone: 'Asia/Shanghai',
+    growthGoal: '首月新增 1000 粉丝',
+    firstTweetText: ''
+  };
 }
 
 function startAccountAutoSetup() {
   const apiKey = document.getElementById('apiKey').value.trim();
   if (!apiKey) {
     setSetupStatus('请先填写并保存 API Key，然后再启动 AI 自动分析。', 'error');
-    showStatus('⚠️ 一键分析需要 API Key。', '#f5a623', 4000);
+    showStatus('一键分析需要 API Key。', '#f5a623', 4000);
     return;
   }
 
   setSetupStatus('正在保存当前表单，并准备读取 X 账号...', 'running');
-  saveOptions({ silent: true }, () => {
+  saveOptions({ silent: true, skipAutoStart: true }, () => {
     chrome.runtime.sendMessage({ action: 'startAccountAutoSetup' }, (response) => {
       if (chrome.runtime.lastError) {
         setSetupStatus(`启动失败：${chrome.runtime.lastError.message}`, 'error');
@@ -190,17 +742,19 @@ function startAccountAutoSetup() {
         return;
       }
       setSetupStatus(response.message || '已开始读取并分析账号。', 'running');
-      showStatus('✅ 已开始读取 X 账号并自动分析。', '#17bf63', 5000);
+      showStatus('已开始读取 X 账号并自动分析。', '#17bf63', 5000);
     });
   });
 }
 
 function setSetupStatus(message, state = '') {
-  const el = document.getElementById('autoSetupStatus');
-  if (!el) return;
-  el.textContent = message;
-  el.classList.remove('running', 'success', 'error');
-  if (state) el.classList.add(state);
+  const status = document.getElementById('sourceAnalysisStatus');
+  if (status) status.textContent = message;
+  const planStatus = document.getElementById('growthPlanStatus');
+  if (planStatus && state) {
+    planStatus.classList.remove('running', 'success', 'error');
+    planStatus.classList.add(state);
+  }
 }
 
 function setValueIfNotFocused(id, value) {
@@ -256,28 +810,28 @@ function updateSetupStatusFromStorage(items) {
   } else if (progress.message) {
     setSetupStatus(progress.message, progress.stage === 'extracted' ? 'success' : 'running');
   } else {
-    setSetupStatus('等待开始。请先确认 X 已登录，并填写 API Key。');
+    setSetupStatus('等待输入链接');
   }
 }
 
 function testPostNow() {
   const text = document.getElementById('testPostText').value.trim();
   if (!text) {
-    showStatus('⚠️ 测试推文内容不能为空。', '#f5a623', 3000);
+    showStatus('测试推文内容不能为空。', '#f5a623', 3000);
     return;
   }
 
   chrome.storage.local.set({ testPostText: text }, () => {
     chrome.runtime.sendMessage({ action: 'testPostNow', text }, (response) => {
       if (chrome.runtime.lastError) {
-        showStatus(`❌ 测试发帖启动失败：${chrome.runtime.lastError.message}`, '#ff4d4f', 6000);
+        showStatus(`测试发帖启动失败：${chrome.runtime.lastError.message}`, '#ff4d4f', 6000);
         return;
       }
       if (!response || !response.success) {
-        showStatus(`❌ 测试发帖启动失败：${response?.error || '未知错误'}`, '#ff4d4f', 6000);
+        showStatus(`测试发帖启动失败：${response?.error || '未知错误'}`, '#ff4d4f', 6000);
         return;
       }
-      showStatus('✅ 已启动测试发帖，请查看 X 标签页和操作记录。', '#17bf63', 5000);
+      showStatus('已启动测试发帖，请查看 X 标签页和操作记录。', '#17bf63', 5000);
     });
   });
 }
@@ -288,14 +842,15 @@ function restoreOptions() {
     apiProvider: 'gemini',
     aiModel: '',
     targetUsers: '',
-    promptTemplate: '你是一个社交媒体引流专家。请根据推文内容，给出一段简短、神回复级别的评论（不超过 40 个字）。\n如果合适的话，请巧妙、自然地顺带提及我的【引流信息】，千万不要显得像生硬的广告，要像朋友间的随口分享：\n\n【推文】：{tweet}\n【引流信息】：{leadTarget}\n\n回复：',
+    promptTemplate: buildPromptTemplate(DEFAULT_ONBOARDING_STRATEGY),
     leadTarget: '',
     postsPerDay: 5,
     postScheduleMode: 'smart',
-    smartTimeSlots: '8-10,12-14,19-23',
+    smartTimeSlots: '9-11,12-14,20-23',
     postInterval: 30,
     aiPersona: { targetUsers: '', characteristics: '', goals: '' },
     agentMemory: DEFAULT_AGENT_MEMORY,
+    onboardingStrategy: DEFAULT_ONBOARDING_STRATEGY,
     competitorReport: '',
     testPostText: DEFAULT_TEST_POST,
     accountBio: '',
@@ -307,27 +862,24 @@ function restoreOptions() {
   }, (items) => {
     document.getElementById('apiKey').value = items.apiKey;
     document.getElementById('apiProvider').value = items.apiProvider;
-    
-    // 如果 storage 中没有 aiModel，则使用对应 provider 的默认值
     const config = PROVIDER_DEFAULTS[items.apiProvider] || PROVIDER_DEFAULTS.gemini;
     document.getElementById('aiModel').value = items.aiModel || config.model;
-    
     document.getElementById('targetUsers').value = items.targetUsers;
     document.getElementById('promptTemplate').value = items.promptTemplate;
-    
-    toggleModelInput();
     document.getElementById('leadTarget').value = items.leadTarget;
     document.getElementById('postsPerDay').value = items.postsPerDay;
     document.getElementById('postScheduleMode').value = items.postScheduleMode;
     document.getElementById('smartTimeSlots').value = items.smartTimeSlots;
     document.getElementById('postInterval').value = items.postInterval;
-    toggleScheduleMode();
     document.getElementById('aiTargetUsers').value = items.aiPersona.targetUsers || '';
     document.getElementById('aiCharacteristics').value = items.aiPersona.characteristics || '';
     document.getElementById('aiGoals').value = items.aiPersona.goals || '';
     fillAgentMemory(items.agentMemory);
     document.getElementById('competitorReport').value = items.competitorReport || '';
     document.getElementById('testPostText').value = items.testPostText || DEFAULT_TEST_POST;
+    applyOnboardingStrategy(items.onboardingStrategy || DEFAULT_ONBOARDING_STRATEGY);
+    toggleModelInput();
+    toggleScheduleMode();
     updateSetupStatusFromStorage(items);
   });
 }

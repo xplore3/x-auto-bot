@@ -87,7 +87,7 @@ function addLog(level, message) {
   });
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   console.log("X Auto Bot extension installed.");
   addLog('info', '扩展程序已安装/更新');
   // 初始化默认配置
@@ -107,6 +107,9 @@ chrome.runtime.onInstalled.addListener(() => {
       });
     }
   });
+  if (details.reason === 'install') {
+    chrome.runtime.openOptionsPage();
+  }
 });
 
 // 处理来自 content scripts 或 popup 的消息
@@ -136,6 +139,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ success: true });
   } else if (request.action === "startAccountAutoSetup") {
     startAccountAutoSetup(sendResponse);
+    return true;
+  } else if (request.action === "analyzeOnboardingSource") {
+    analyzeOnboardingSource(request.sourceInput || '')
+      .then((analysis) => sendResponse({ success: true, analysis }))
+      .catch((error) => {
+        addLog('warn', `启动向导分析失败: ${error.message}`);
+        sendResponse({ success: false, error: error.message });
+      });
     return true;
   } else if (request.action === "maybeStartAgentAfterSetup") {
     maybeStartAgentAfterSetup(sendResponse);
@@ -717,6 +728,123 @@ ${bio || '暂无'}
       chrome.storage.local.set({ isAnalyzingPersona: false });
     }
   });
+}
+
+async function analyzeOnboardingSource(sourceInput) {
+  const source = (sourceInput || '').trim();
+  if (!source) throw new Error('缺少产品网站或 X 账号');
+
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel'], async (config) => {
+      const errors = getAIConnectionErrors(config);
+      if (errors.length > 0) {
+        reject(new Error(errors.join('；')));
+        return;
+      }
+
+      const prompt = `你是世界级 AI 产品经理和 X 增长策略专家。
+请根据用户输入的产品网站、X 主页、竞品网站或希望模仿的账号，设计一套“X 发声 Agent 启动向导”的初始策略。
+
+用户输入：
+${source}
+
+目标用户是：想在 X 上建立影响力的创始人、独立开发者、出海从业者、AI 工具人、投资/研究人员；以及有想法但输出不稳定、会刷 X 但不会把输入转化为观点和内容、强烈想做 KOL 的人。
+
+请遵守：
+- 如果无法真实访问链接，不要编造具体数据、融资、客户、收益、产品功能。
+- 可以基于 URL、handle、行业关键词进行保守推断。
+- 输出要用于前端多选卡片确认，而不是长篇报告。
+- 不做收益承诺，不建议擦边、政治动员或刷屏。
+
+只能返回 JSON 对象，格式如下：
+{
+  "sourceInput": "${source.replace(/"/g, '\\"')}",
+  "accountUse": "brand|evangelist|curator|kol",
+  "audience": ["founders|indie|global|aiBuilders|researchers"],
+  "audienceCustom": "",
+  "content": ["insights|playbooks|stories|curation|softPromo"],
+  "contentCustom": "",
+  "contentMode": "balanced|growth|trust",
+  "postStyle": "concise|story|contrarian",
+  "preferredLanguage": "en|ja|ko|zh-CN|zh-TW",
+  "targetTimezone": "Asia/Shanghai|America/Los_Angeles|America/New_York|Europe/London|Asia/Tokyo|Asia/Seoul",
+  "growthGoal": "首月新增 1000 粉丝",
+  "automationMode": "review",
+  "firstTweetText": "一条可直接作为第一条推文的内容",
+  "leadTarget": "低压、可信、不硬广的行动入口",
+  "persona": {
+    "targetUsers": "...",
+    "characteristics": "...",
+    "goals": "..."
+  },
+  "memory": {
+    "identity": "...",
+    "marketPosition": "...",
+    "audienceSegments": "...",
+    "audiencePains": "...",
+    "contentPillars": "...",
+    "contentAngles": "...",
+    "proofAssets": "...",
+    "personalStories": "...",
+    "coreOpinions": "...",
+    "boundaries": "...",
+    "voiceRules": "...",
+    "bannedClaims": "...",
+    "interactionTargets": "...",
+    "replyStrategy": "...",
+    "sourceInputs": "...",
+    "weeklyReviewSignals": "..."
+  },
+  "competitorReport": "简短 Markdown：推荐观察的账号类型、低粉爆款钩子、第一周执行建议"
+}`;
+
+      try {
+        addLog('info', '开始启动向导来源分析');
+        const generatedText = await callLLM(prompt, config, true);
+        const cleanJsonStr = generatedText.replace(/```json/g, '').replace(/```/g, '').trim();
+        const parsed = JSON.parse(cleanJsonStr);
+        const analysis = normalizeOnboardingAnalysis(parsed, source);
+        chrome.storage.local.set({ onboardingSourceAnalysis: analysis }, () => {
+          addLog('success', '启动向导来源分析完成');
+          resolve(analysis);
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}
+
+function normalizeOnboardingAnalysis(parsed = {}, sourceInput = '') {
+  const pick = (value, allowed, fallback) => allowed.includes(value) ? value : fallback;
+  const pickList = (values, allowed, fallback) => {
+    const list = Array.isArray(values) ? values.filter(value => allowed.includes(value)) : [];
+    return list.length > 0 ? list : fallback;
+  };
+
+  return {
+    sourceInput: parsed.sourceInput || sourceInput,
+    accountUse: pick(parsed.accountUse, ['brand', 'evangelist', 'curator', 'kol'], 'evangelist'),
+    audience: pickList(parsed.audience, ['founders', 'indie', 'global', 'aiBuilders', 'researchers'], ['founders', 'indie']),
+    audienceCustom: memoryValueToText(parsed.audienceCustom),
+    content: pickList(parsed.content, ['insights', 'playbooks', 'stories', 'curation', 'softPromo'], ['insights', 'playbooks']),
+    contentCustom: memoryValueToText(parsed.contentCustom),
+    contentMode: pick(parsed.contentMode, ['balanced', 'growth', 'trust'], 'balanced'),
+    postStyle: pick(parsed.postStyle, ['concise', 'story', 'contrarian'], 'concise'),
+    preferredLanguage: pick(parsed.preferredLanguage, ['en', 'ja', 'ko', 'zh-CN', 'zh-TW'], 'zh-CN'),
+    targetTimezone: pick(parsed.targetTimezone, ['Asia/Shanghai', 'America/Los_Angeles', 'America/New_York', 'Europe/London', 'Asia/Tokyo', 'Asia/Seoul'], 'Asia/Shanghai'),
+    growthGoal: memoryValueToText(parsed.growthGoal) || '首月新增 1000 粉丝',
+    automationMode: pick(parsed.automationMode, ['auto', 'review', 'shadowReply'], 'review'),
+    firstTweetText: memoryValueToText(parsed.firstTweetText),
+    leadTarget: memoryValueToText(parsed.leadTarget),
+    persona: {
+      targetUsers: memoryValueToText(parsed.persona?.targetUsers),
+      characteristics: memoryValueToText(parsed.persona?.characteristics),
+      goals: memoryValueToText(parsed.persona?.goals)
+    },
+    memory: mergeAgentMemory(DEFAULT_AGENT_MEMORY, parsed.memory || parsed.agentMemory || {}),
+    competitorReport: memoryValueToText(parsed.competitorReport)
+  };
 }
 
 async function analyzeCompetitors(persona, agentMemoryOverride) {
