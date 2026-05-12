@@ -139,6 +139,19 @@ const LANGUAGE_TIMEZONE_DEFAULTS = {
   'zh-TW': 'Asia/Shanghai'
 };
 
+const LOG_LEVEL_LABELS = {
+  info: '信息',
+  success: '成功',
+  warn: '警告',
+  error: '错误'
+};
+
+const LOG_SOURCE_LABELS = {
+  scraper: '内容抓取',
+  automator: '自动操作',
+  background: '后台服务'
+};
+
 const TIMEZONE_SCHEDULES = {
   'Asia/Shanghai': '9-11,12-14,20-23',
   'America/Los_Angeles': '7-9,12-14,18-22',
@@ -194,9 +207,10 @@ function initOptions() {
   bind('firstActionPostBtn', 'click', postFirstActionTweet);
   bind('targetTimezone', 'change', updatePlanPreview);
   bind('growthGoal', 'input', updatePlanPreview);
+  bind('refreshLogsBtn', 'click', loadInlineLogs);
   initChoiceCards();
   initAutoSave();
-  initModuleNavigation();
+  loadInlineLogs();
   restoreOptions();
 }
 
@@ -238,27 +252,6 @@ function initAutoSave() {
       scheduleAutoSave();
     }
   });
-}
-
-function initModuleNavigation() {
-  const items = Array.from(document.querySelectorAll('.module-item[href^="#"]'));
-  if (items.length === 0) return;
-
-  const activate = () => {
-    const currentHash = window.location.hash || '#onboarding';
-    items.forEach((item) => {
-      item.classList.toggle('is-active', item.getAttribute('href') === currentHash);
-    });
-  };
-
-  items.forEach((item) => {
-    item.addEventListener('click', () => {
-      items.forEach(link => link.classList.remove('is-active'));
-      item.classList.add('is-active');
-    });
-  });
-  window.addEventListener('hashchange', activate);
-  activate();
 }
 
 function scheduleAutoSave() {
@@ -992,6 +985,71 @@ function testPostNow() {
   });
 }
 
+function formatInlineLogTime(ts) {
+  const d = new Date(ts);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${mm}-${dd} ${hh}:${mi}:${ss}`;
+}
+
+function loadInlineLogs() {
+  if (!globalThis.chrome?.storage?.local) {
+    renderInlineLogs([]);
+    return;
+  }
+  chrome.storage.local.get(['logs'], (result) => {
+    renderInlineLogs(result.logs || []);
+  });
+}
+
+function renderInlineLogs(logs = []) {
+  const list = document.getElementById('inlineLogList');
+  if (!list) return;
+
+  const counts = { success: 0, warn: 0, error: 0 };
+  logs.forEach((log) => {
+    if (counts[log.level] !== undefined) counts[log.level] += 1;
+  });
+  setText('inlineLogTotal', String(logs.length));
+  setText('inlineLogSuccess', String(counts.success));
+  setText('inlineLogWarn', String(counts.warn));
+  setText('inlineLogError', String(counts.error));
+
+  const recentLogs = logs.slice(-40).reverse();
+  if (recentLogs.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'inline-log-empty';
+    empty.textContent = '暂无操作记录';
+    list.replaceChildren(empty);
+    return;
+  }
+
+  const rows = recentLogs.map((log) => {
+    const row = document.createElement('div');
+    row.className = 'inline-log-row';
+
+    const time = document.createElement('span');
+    time.className = 'inline-log-time';
+    time.textContent = formatInlineLogTime(log.time);
+
+    const level = document.createElement('span');
+    level.className = `inline-log-level ${log.level || 'info'}`;
+    level.textContent = LOG_LEVEL_LABELS[log.level] || log.level || '信息';
+
+    const message = document.createElement('span');
+    message.className = 'inline-log-message';
+    const source = LOG_SOURCE_LABELS[log.source] || log.source || '未知';
+    message.textContent = `[${source}] ${log.message || ''}`;
+
+    row.append(time, level, message);
+    return row;
+  });
+  list.replaceChildren(...rows);
+}
+
 function restoreOptions() {
   chrome.storage.local.get({
     apiKey: '',
@@ -1055,6 +1113,9 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   }
   if (changes.agentMemory) {
     fillAgentMemory(changes.agentMemory.newValue || {}, true);
+  }
+  if (changes.logs) {
+    renderInlineLogs(changes.logs.newValue || []);
   }
 
   chrome.storage.local.get([
