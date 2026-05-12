@@ -21,8 +21,8 @@
         <a href="#strategy-wizard">策略选择</a>
         <a href="#blueprint">涨粉计划</a>
         <a href="#runtime">模型与发布</a>
-        <a href="#advanced-memory">高级记忆</a>
-        <a href="#diagnostics">测试与记录</a>
+        <a href="#advanced-memory">Agent 知识库</a>
+        <a href="#diagnostics">测试复盘</a>
         <a href="../logs/logs.html">行动记录</a>
       </nav>
     </aside>
@@ -404,136 +404,225 @@
         </div>
       </section>
 
-      <details class="panel advanced-panel" id="advanced-memory">
-        <summary>
-          <span>
-            <span class="eyebrow">Advanced Memory</span>
-            <strong>AI 长期记忆与高级 Prompt</strong>
-          </span>
-          <em>展开编辑</em>
-        </summary>
-
-        <div class="field-grid advanced-grid">
-          <div class="form-group span-2">
-            <label for="leadTarget">引流目标 / 自我介绍 / 行动入口</label>
-            <textarea id="leadTarget" rows="4" placeholder="例如：我长期分享 AI 工具、出海项目和个人商业化实操，欢迎关注交流。"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="memoryIdentity">我是谁，以及为什么值得关注</label>
-            <textarea id="memoryIdentity" rows="5" placeholder="身份、阶段、正在做的事、长期关注的问题、可公开的经历。"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="aiGoals">发文及引流核心目标</label>
-            <textarea id="aiGoals" rows="5" placeholder="涨粉、建立信任、收集线索、招募用户、影响投资者等。"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="aiTargetUsers">目标用户群体</label>
-            <textarea id="aiTargetUsers" rows="5" placeholder="核心读者画像。"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="audienceSegments">读者分层</label>
-            <textarea id="audienceSegments" rows="5"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="audiencePains">读者痛点与未被满足的需求</label>
-            <textarea id="audiencePains" rows="6"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="marketPosition">账号差异化定位</label>
-            <textarea id="marketPosition" rows="6"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="contentPillars">长期内容支柱</label>
-            <textarea id="contentPillars" rows="6"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="contentAngles">可复用选题角度</label>
-            <textarea id="contentAngles" rows="6"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="personalStories">个人故事与案例素材</label>
-            <textarea id="personalStories" rows="6"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="sourceInputs">日常输入来源</label>
-            <textarea id="sourceInputs" rows="6"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="coreOpinions">核心观点与立场</label>
-            <textarea id="coreOpinions" rows="6"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="boundaries">不做什么 / 不碰什么</label>
-            <textarea id="boundaries" rows="6"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="aiCharacteristics">发文特征与人设语气</label>
-            <textarea id="aiCharacteristics" rows="6"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="voiceRules">表达规则</label>
-            <textarea id="voiceRules" rows="6"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="bannedClaims">禁用话术与风险声明</label>
-            <textarea id="bannedClaims" rows="5"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="proofAssets">可信背书与成果资产</label>
-            <textarea id="proofAssets" rows="5"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="targetUsers">优先关注账号</label>
-            <textarea id="targetUsers" rows="6" placeholder="每行一个账号"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="interactionTargets">优先互动对象</label>
-            <textarea id="interactionTargets" rows="6"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="replyStrategy">评论引流策略</label>
-            <textarea id="replyStrategy" rows="6"></textarea>
-          </div>
-
-          <div class="form-group span-2">
-            <label for="promptTemplate">回复 Prompt</label>
-            <textarea id="promptTemplate" rows="7" placeholder="支持 {tweet} 和 {leadTarget} 两个变量。"></textarea>
-          </div>
-        </div>
-      </details>
-
-      <section class="panel" id="diagnostics">
+      <section class="panel memory-panel" id="advanced-memory">
         <div class="panel-head">
           <div>
-            <p class="eyebrow">Test & Review</p>
-            <h2>测试、复盘与智能分析</h2>
+            <p class="eyebrow">Agent Knowledge Base</p>
+            <h2>Agent 知识库与行为规则</h2>
+            <p class="panel-intro">这里不是让新用户手写 Prompt，而是沉淀 Agent 的长期记忆：它是谁、服务谁、讲什么、怎么讲、哪些话不能说。</p>
           </div>
-          <span class="panel-tag warning">Live</span>
+          <span class="panel-tag">Auto Saved</span>
         </div>
 
-        <div class="field-grid">
-          <div class="form-group">
-            <label for="testPostText">中文测试推文</label>
-            <textarea id="testPostText" rows="8">AI副业别先找工具。
+        <div class="memory-overview">
+          <div class="memory-map-card">
+            <span>01</span>
+            <strong>定位与入口</strong>
+            <p>决定读者为什么关注，以及关注后应该去哪里。</p>
+          </div>
+          <div class="memory-map-card">
+            <span>02</span>
+            <strong>读者地图</strong>
+            <p>决定选题、案例、术语密度和互动对象。</p>
+          </div>
+          <div class="memory-map-card">
+            <span>03</span>
+            <strong>内容引擎</strong>
+            <p>决定每日输出的观点、故事、素材和选题结构。</p>
+          </div>
+          <div class="memory-map-card">
+            <span>04</span>
+            <strong>表达边界</strong>
+            <p>决定语气、风险红线和评论引流方式。</p>
+          </div>
+        </div>
+
+        <div class="memory-editor">
+          <details class="memory-group" open>
+            <summary>
+              <span>
+                <strong>定位与行动入口</strong>
+                <em>用户看见账号后，应该立刻理解你是谁、凭什么值得关注、下一步做什么。</em>
+              </span>
+            </summary>
+            <div class="field-grid memory-fields">
+              <div class="form-group span-2">
+                <label for="leadTarget">行动入口 / 自我介绍</label>
+                <textarea id="leadTarget" rows="4" placeholder="例如：我长期分享 AI 工具、出海项目和个人商业化实操，欢迎关注交流。"></textarea>
+              </div>
+              <div class="form-group">
+                <label for="memoryIdentity">账号身份与可信理由</label>
+                <textarea id="memoryIdentity" rows="5" placeholder="身份、阶段、正在做的事、长期关注的问题、可公开的经历。"></textarea>
+              </div>
+              <div class="form-group">
+                <label for="aiGoals">发文与增长目标</label>
+                <textarea id="aiGoals" rows="5" placeholder="涨粉、建立信任、收集线索、招募用户、影响投资者等。"></textarea>
+              </div>
+              <div class="form-group span-2">
+                <label for="marketPosition">账号差异化定位</label>
+                <textarea id="marketPosition" rows="5" placeholder="这个账号和同赛道其他账号相比，凭什么更值得关注。"></textarea>
+              </div>
+            </div>
+          </details>
+
+          <details class="memory-group" open>
+            <summary>
+              <span>
+                <strong>读者地图与痛点</strong>
+                <em>把“目标用户”从泛泛人群拆成可写、可互动、可转化的具体读者。</em>
+              </span>
+            </summary>
+            <div class="field-grid memory-fields">
+              <div class="form-group">
+                <label for="aiTargetUsers">核心目标用户</label>
+                <textarea id="aiTargetUsers" rows="5" placeholder="核心读者画像。"></textarea>
+              </div>
+              <div class="form-group">
+                <label for="audienceSegments">读者分层</label>
+                <textarea id="audienceSegments" rows="5"></textarea>
+              </div>
+              <div class="form-group span-2">
+                <label for="audiencePains">读者痛点与未被满足的需求</label>
+                <textarea id="audiencePains" rows="5"></textarea>
+              </div>
+            </div>
+          </details>
+
+          <details class="memory-group" open>
+            <summary>
+              <span>
+                <strong>内容引擎</strong>
+                <em>把日常输入变成稳定输出，避免 Agent 每次临场发挥。</em>
+              </span>
+            </summary>
+            <div class="field-grid memory-fields">
+              <div class="form-group">
+                <label for="contentPillars">长期内容支柱</label>
+                <textarea id="contentPillars" rows="6"></textarea>
+              </div>
+              <div class="form-group">
+                <label for="contentAngles">可复用选题角度</label>
+                <textarea id="contentAngles" rows="6"></textarea>
+              </div>
+              <div class="form-group">
+                <label for="coreOpinions">核心观点与立场</label>
+                <textarea id="coreOpinions" rows="6"></textarea>
+              </div>
+              <div class="form-group">
+                <label for="personalStories">个人故事与案例素材</label>
+                <textarea id="personalStories" rows="6"></textarea>
+              </div>
+              <div class="form-group">
+                <label for="proofAssets">可信背书与成果资产</label>
+                <textarea id="proofAssets" rows="5"></textarea>
+              </div>
+              <div class="form-group">
+                <label for="sourceInputs">日常输入来源</label>
+                <textarea id="sourceInputs" rows="5"></textarea>
+              </div>
+            </div>
+          </details>
+
+          <details class="memory-group" open>
+            <summary>
+              <span>
+                <strong>表达方式、边界与互动</strong>
+                <em>让 Agent 知道怎么像你说话，也知道哪些内容不能碰。</em>
+              </span>
+            </summary>
+            <div class="field-grid memory-fields">
+              <div class="form-group">
+                <label for="aiCharacteristics">人设语气与内容策略模板</label>
+                <textarea id="aiCharacteristics" rows="6"></textarea>
+              </div>
+              <div class="form-group">
+                <label for="voiceRules">表达规则</label>
+                <textarea id="voiceRules" rows="6"></textarea>
+              </div>
+              <div class="form-group">
+                <label for="boundaries">不做什么 / 不碰什么</label>
+                <textarea id="boundaries" rows="5"></textarea>
+              </div>
+              <div class="form-group">
+                <label for="bannedClaims">禁用话术与风险声明</label>
+                <textarea id="bannedClaims" rows="5"></textarea>
+              </div>
+              <div class="form-group">
+                <label for="targetUsers">优先关注账号</label>
+                <textarea id="targetUsers" rows="6" placeholder="每行一个账号"></textarea>
+              </div>
+              <div class="form-group">
+                <label for="interactionTargets">优先互动对象</label>
+                <textarea id="interactionTargets" rows="6"></textarea>
+              </div>
+              <div class="form-group span-2">
+                <label for="replyStrategy">评论引流策略</label>
+                <textarea id="replyStrategy" rows="5"></textarea>
+              </div>
+            </div>
+          </details>
+
+          <details class="memory-group prompt-lab">
+            <summary>
+              <span>
+                <strong>专家模式：回复 Prompt</strong>
+                <em>仅在你明确要调整自动回复底层指令时修改。</em>
+              </span>
+            </summary>
+            <div class="field-grid memory-fields">
+              <div class="form-group span-2">
+                <label for="promptTemplate">回复 Prompt</label>
+                <textarea id="promptTemplate" rows="7" placeholder="支持 {tweet} 和 {leadTarget} 两个变量。"></textarea>
+              </div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section class="panel diagnostics-panel" id="diagnostics">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Test & Review Center</p>
+            <h2>测试发帖、复盘与策略迭代</h2>
+            <p class="panel-intro">这里负责把 Agent 从“能生成内容”推进到“能稳定改进”：先验证发布链路，再记录表现，最后把有效信号喂回知识库。</p>
+          </div>
+          <span class="panel-tag warning">Live Test</span>
+        </div>
+
+        <div class="review-flow">
+          <div class="review-step">
+            <span>1</span>
+            <strong>预演</strong>
+            <p>检查文案换行、中文预填和账号登录态。</p>
+          </div>
+          <div class="review-step">
+            <span>2</span>
+            <strong>小流量发布</strong>
+            <p>先用测试推文验证真实发送链路。</p>
+          </div>
+          <div class="review-step">
+            <span>3</span>
+            <strong>记录信号</strong>
+            <p>记录涨粉、回复、收藏、误解和高表现角度。</p>
+          </div>
+          <div class="review-step">
+            <span>4</span>
+            <strong>迭代策略</strong>
+            <p>把有效模式写回选题、语气和互动规则。</p>
+          </div>
+        </div>
+
+        <div class="diagnostic-grid">
+          <div class="test-card">
+            <div class="card-headline">
+              <div>
+                <p class="eyebrow">Dry Run</p>
+                <h3>测试发帖链路</h3>
+              </div>
+              <button id="testPostBtn" class="btn-secondary" type="button">启动测试发帖</button>
+            </div>
+            <label for="testPostText">测试推文</label>
+            <textarea id="testPostText" rows="9">AI副业别先找工具。
 
 先找需求：
 谁在海外平台付费？
@@ -541,18 +630,34 @@
 你能不能用AI把交付成本压低？
 
 工具不值钱，能交付结果才值钱。</textarea>
-            <p class="help-text">不依赖 API Key，用来验证登录态、中文预填、文本校验和发送按钮状态。</p>
-            <button id="testPostBtn" class="btn-secondary" type="button">启动测试发帖</button>
+            <p class="help-text">不依赖 API Key。后台会在发出前统一做中文换行、文本校验和失败暂停。</p>
+          </div>
+
+          <aside class="test-checklist">
+            <p class="eyebrow">Safety Checks</p>
+            <h3>发送前检查项</h3>
+            <ul>
+              <li>是否存在 X 登录态</li>
+              <li>输入框文本是否与待发文本一致</li>
+              <li>中文和换行是否保留</li>
+              <li>发送按钮是否由 X 自身判定可用</li>
+              <li>失败时是否暂停并写入日志</li>
+            </ul>
+            <a class="btn-secondary log-link" href="../logs/logs.html">查看行动记录</a>
+          </aside>
+        </div>
+
+        <div class="review-grid">
+          <div class="form-group">
+            <label for="weeklyReviewSignals">复盘信号池</label>
+            <textarea id="weeklyReviewSignals" rows="9" placeholder="记录哪些帖子涨粉、哪些评论带来回复、哪些选题收藏高、哪些表达引发误解。"></textarea>
+            <p class="help-text">建议每周维护一次。这里的内容会作为长期记忆的一部分，影响后续草稿生成。</p>
           </div>
 
           <div class="form-group">
-            <label for="weeklyReviewSignals">每周复盘指标</label>
-            <textarea id="weeklyReviewSignals" rows="8" placeholder="哪些帖子涨粉、哪些评论带来回复、哪些选题收藏高、哪些表达引发误解。"></textarea>
-          </div>
-
-          <div class="form-group span-2">
-            <label for="competitorReport">竞品对标与低粉爆款运营拆解报告</label>
-            <textarea id="competitorReport" rows="14" placeholder="账号画像完成后会自动生成，也可以手动维护。"></textarea>
+            <label for="competitorReport">爆款拆解与对标报告</label>
+            <textarea id="competitorReport" rows="9" placeholder="账号画像完成后会自动生成，也可以手动维护。"></textarea>
+            <p class="help-text">用于沉淀对标账号、低粉爆款框架、评论截流策略和风险边界。</p>
           </div>
         </div>
       </section>

@@ -157,6 +157,14 @@ h1 {
   font-size: 19px;
 }
 
+.panel-intro {
+  max-width: 780px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .panel-tag {
   display: inline-flex;
   align-items: center;
@@ -603,6 +611,238 @@ h1 {
   padding: 0 22px 22px;
 }
 
+.memory-panel {
+  background: #fff;
+}
+
+.memory-overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.memory-map-card {
+  min-height: 122px;
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fbfcfd;
+}
+
+.memory-map-card span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-bottom: 10px;
+  border-radius: 999px;
+  background: #eef7f2;
+  color: var(--success);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.memory-map-card strong {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.memory-map-card p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.memory-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.memory-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+  overflow: hidden;
+}
+
+.memory-group summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 15px 16px;
+  cursor: pointer;
+  list-style: none;
+  background: #fbfcfd;
+}
+
+.memory-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.memory-group summary::after {
+  content: "展开";
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.memory-group[open] summary::after {
+  content: "收起";
+}
+
+.memory-group summary strong,
+.test-checklist h3,
+.test-card h3 {
+  display: block;
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.memory-group summary em {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.45;
+}
+
+.memory-fields {
+  padding: 16px;
+}
+
+.prompt-lab {
+  border-color: rgba(183, 121, 31, 0.28);
+}
+
+.prompt-lab summary {
+  background: #fffaf0;
+}
+
+.diagnostics-panel {
+  background: #fff;
+}
+
+.review-flow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.review-step {
+  min-height: 112px;
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fbfcfd;
+}
+
+.review-step span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-bottom: 10px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.review-step strong {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.review-step p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.diagnostic-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.55fr);
+  gap: 18px;
+  align-items: stretch;
+  margin-bottom: 18px;
+}
+
+.test-card,
+.test-checklist {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fbfcfd;
+}
+
+.card-headline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.test-checklist {
+  display: flex;
+  flex-direction: column;
+}
+
+.test-checklist ul {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.test-checklist li {
+  position: relative;
+  padding-left: 22px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.test-checklist li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.45em;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--success);
+}
+
+.log-link {
+  margin-top: auto;
+  align-self: flex-start;
+}
+
+.review-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
 .section-caption {
   margin: 22px 0 14px;
   padding-top: 18px;
@@ -790,6 +1030,10 @@ code {
   .source-input-row,
   .blueprint-actions,
   .blueprint-grid,
+  .memory-overview,
+  .review-flow,
+  .diagnostic-grid,
+  .review-grid,
   .choice-grid.three,
   .choice-grid.four,
   .choice-grid.five,
