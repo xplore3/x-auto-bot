@@ -196,6 +196,7 @@ function initOptions() {
   bind('growthGoal', 'input', updatePlanPreview);
   initChoiceCards();
   initAutoSave();
+  initModuleNavigation();
   restoreOptions();
 }
 
@@ -237,6 +238,27 @@ function initAutoSave() {
       scheduleAutoSave();
     }
   });
+}
+
+function initModuleNavigation() {
+  const items = Array.from(document.querySelectorAll('.module-item[href^="#"]'));
+  if (items.length === 0) return;
+
+  const activate = () => {
+    const currentHash = window.location.hash || '#onboarding';
+    items.forEach((item) => {
+      item.classList.toggle('is-active', item.getAttribute('href') === currentHash);
+    });
+  };
+
+  items.forEach((item) => {
+    item.addEventListener('click', () => {
+      items.forEach(link => link.classList.remove('is-active'));
+      item.classList.add('is-active');
+    });
+  });
+  window.addEventListener('hashchange', activate);
+  activate();
 }
 
 function scheduleAutoSave() {

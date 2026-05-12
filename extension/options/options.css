@@ -97,7 +97,7 @@ nav a:hover {
 
 .workspace {
   width: 100%;
-  max-width: 1180px;
+  max-width: 1460px;
   padding: 28px;
 }
 
@@ -134,6 +134,119 @@ h1 {
   margin: 10px 0 0;
   color: var(--muted);
   line-height: 1.55;
+}
+
+.console-shell {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.module-list {
+  position: sticky;
+  top: 18px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.agent-state-card,
+.module-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.agent-state-card {
+  padding: 15px;
+}
+
+.agent-state-topline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-state-topline strong {
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--success);
+  box-shadow: 0 0 0 4px rgba(15, 159, 110, 0.12);
+}
+
+.agent-state-card p {
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.module-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 4px;
+  min-height: 76px;
+  padding: 13px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.module-item:hover {
+  border-color: rgba(15, 139, 214, 0.45);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
+}
+
+.module-item.is-active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  box-shadow: 0 0 0 3px rgba(15, 139, 214, 0.1);
+}
+
+.module-index {
+  grid-row: span 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #eef2f5;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.module-item.is-active .module-index {
+  background: var(--primary);
+  color: #fff;
+}
+
+.module-item strong {
+  min-width: 0;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.module-item em {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.detail-stack {
+  min-width: 0;
 }
 
 .panel {
@@ -1016,6 +1129,19 @@ code {
     padding: 20px;
   }
 
+  .console-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .module-list {
+    position: static;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .agent-state-card {
+    grid-column: 1 / -1;
+  }
+
   .page-header,
   .panel-head {
     flex-direction: column;
@@ -1053,5 +1179,11 @@ code {
 
   .span-2 {
     grid-column: span 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .module-list {
+    grid-template-columns: 1fr;
   }
 }

@@ -37,6 +37,49 @@
         <button id="saveBtn" class="btn-primary">保存 Agent</button>
       </header>
 
+      <div class="console-shell">
+        <aside class="module-list" aria-label="Agent 模块">
+          <div class="agent-state-card">
+            <div class="agent-state-topline">
+              <span class="status-dot"></span>
+              <strong>Agent Console</strong>
+            </div>
+            <p>按模块管理你的 X Agent。左侧是工作区，中间是配置对象，右侧是当前模块详情。</p>
+          </div>
+
+          <a class="module-item is-active" href="#onboarding">
+            <span class="module-index">01</span>
+            <strong>启动输入</strong>
+            <em>链接、账号或竞品来源</em>
+          </a>
+          <a class="module-item" href="#strategy-wizard">
+            <span class="module-index">02</span>
+            <strong>策略画像</strong>
+            <em>角色、读者、内容和引流资产</em>
+          </a>
+          <a class="module-item" href="#blueprint">
+            <span class="module-index">03</span>
+            <strong>执行计划</strong>
+            <em>发帖节奏、模式和首条推文</em>
+          </a>
+          <a class="module-item" href="#runtime">
+            <span class="module-index">04</span>
+            <strong>运行参数</strong>
+            <em>模型连接和发布调度</em>
+          </a>
+          <a class="module-item" href="#advanced-memory">
+            <span class="module-index">05</span>
+            <strong>长期记忆</strong>
+            <em>知识库、语气和风险边界</em>
+          </a>
+          <a class="module-item" href="#diagnostics">
+            <span class="module-index">06</span>
+            <strong>测试复盘</strong>
+            <em>发帖预演、日志和策略迭代</em>
+          </a>
+        </aside>
+
+        <div class="detail-stack">
       <section class="panel setup-panel" id="onboarding">
         <div class="panel-head">
           <div>
@@ -690,6 +733,8 @@
       <div class="sticky-actions">
         <span id="statusMessage" class="status-msg"></span>
         <button id="saveBtnMirror" class="btn-primary" type="button">保存 Agent</button>
+      </div>
+        </div>
       </div>
     </main>
   </div>
