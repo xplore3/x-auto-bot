@@ -75,13 +75,22 @@ body {
   margin-top: 2px;
 }
 
-nav {
+.primary-nav {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-nav a {
+.nav-label {
+  margin: 10px 0 4px;
+  color: #6f7d8d;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.primary-nav a {
   color: #c8d3df;
   text-decoration: none;
   padding: 10px 12px;
@@ -90,7 +99,8 @@ nav a {
   font-weight: 650;
 }
 
-nav a:hover {
+.primary-nav a:hover,
+.primary-nav a.is-current {
   background: #1b2633;
   color: #fff;
 }
@@ -1120,9 +1130,13 @@ code {
     height: auto;
   }
 
-  nav {
+  .primary-nav {
     flex-direction: row;
     flex-wrap: wrap;
+  }
+
+  .nav-label {
+    width: 100%;
   }
 
   .workspace {
