@@ -159,6 +159,8 @@ const ANALYSIS_MESSAGES = [
 
 let analysisTimer = null;
 let analysisStartedAt = 0;
+let sourceAnalysisRunning = false;
+let sourceAnalysisLocked = false;
 
 function initOptions() {
   bind('saveBtn', 'click', saveOptions);
@@ -166,7 +168,6 @@ function initOptions() {
   bind('apiProvider', 'change', toggleModelInput);
   bind('postScheduleMode', 'change', toggleScheduleMode);
   bind('testPostBtn', 'click', testPostNow);
-  bind('analyzeProfileBtn', 'click', startAccountAutoSetup);
   bind('analyzeSourceBtn', 'click', analyzeSourceNow);
   bind('buildPlanBtn', 'click', buildGrowthPlan);
   bind('applyPlanBtn', 'click', applyPlanToAgent);
@@ -589,7 +590,6 @@ function buildGrowthPlan(options = {}) {
     syncWizardToFields({ overwrite });
     document.getElementById('firstTweetPreview').value = strategy.firstTweetText || composeFirstTweet(strategy);
     document.getElementById('testPostText').value = document.getElementById('firstTweetPreview').value;
-    setSetupStatus(`计划已生成：${plan.postCountLabel}，${plan.schedule} 发布，目标 ${plan.growthGoal}。`, 'success');
     stopPlanProgress('涨粉计划已生成，可应用到 Agent 记忆。', 'success');
     updatePlanPreview();
   }, 800);
@@ -628,7 +628,8 @@ function postFirstActionTweet() {
 function analyzeSourceNow() {
   const sourceInput = document.getElementById('sourceInput').value.trim();
   if (!sourceInput) {
-    setSetupStatus('请先输入产品网站、X 主页、竞品网站或希望模仿的账号。', 'error');
+    setSourceAnalysisStatus('请先输入链接或账号。');
+    updateAnalysisSteps(-1, 'error');
     return;
   }
 
@@ -652,25 +653,57 @@ function analyzeSourceNow() {
 
 function startAnalysisProgress(message) {
   clearInterval(analysisTimer);
+  sourceAnalysisRunning = true;
+  sourceAnalysisLocked = false;
   analysisStartedAt = Date.now();
-  setText('sourceAnalysisStatus', message);
+  setSourceAnalysisStatus(message);
   document.getElementById('sourceAnalysisProgress').style.width = '8%';
   document.getElementById('analysisTimer').textContent = '0s / 60s';
+  updateAnalysisSteps(0);
   analysisTimer = setInterval(() => {
     const seconds = Math.min(60, Math.floor((Date.now() - analysisStartedAt) / 1000));
     const percent = Math.min(92, 8 + seconds * 1.4);
+    const activeStep = seconds < 20 ? 0 : (seconds < 40 ? 1 : 2);
     document.getElementById('analysisTimer').textContent = `${seconds}s / 60s`;
     document.getElementById('sourceAnalysisProgress').style.width = `${percent}%`;
-    setText('sourceAnalysisStatus', ANALYSIS_MESSAGES[seconds % ANALYSIS_MESSAGES.length]);
+    updateAnalysisSteps(activeStep);
+    setSourceAnalysisStatus(ANALYSIS_MESSAGES[activeStep] || message);
   }, 1000);
 }
 
 function stopAnalysisProgress(message, state = '') {
   clearInterval(analysisTimer);
   analysisTimer = null;
+  sourceAnalysisRunning = false;
+  sourceAnalysisLocked = true;
   document.getElementById('sourceAnalysisProgress').style.width = state === 'error' ? '20%' : '100%';
   document.getElementById('analysisTimer').textContent = state === 'error' ? '--' : `${Math.min(60, Math.floor((Date.now() - analysisStartedAt) / 1000))}s / 60s`;
-  setSetupStatus(message, state);
+  updateAnalysisSteps(-1, state === 'error' ? 'error' : 'done');
+  setSourceAnalysisStatus(message);
+}
+
+function setSourceAnalysisStatus(message) {
+  setText('sourceAnalysisStatus', message);
+}
+
+function updateAnalysisSteps(activeIndex = -1, finalState = '') {
+  const steps = Array.from(document.querySelectorAll('.analysis-step'));
+  steps.forEach((step, index) => {
+    step.classList.remove('running', 'done', 'error');
+    if (finalState === 'done') {
+      step.classList.add('done');
+      return;
+    }
+    if (finalState === 'error') {
+      if (index === Math.max(0, activeIndex)) step.classList.add('error');
+      return;
+    }
+    if (index < activeIndex) {
+      step.classList.add('done');
+    } else if (index === activeIndex) {
+      step.classList.add('running');
+    }
+  });
 }
 
 function applySourceAnalysis(analysis) {
@@ -748,12 +781,11 @@ function startAccountAutoSetup() {
 }
 
 function setSetupStatus(message, state = '') {
-  const status = document.getElementById('sourceAnalysisStatus');
-  if (status) status.textContent = message;
   const planStatus = document.getElementById('growthPlanStatus');
   if (planStatus && state) {
     planStatus.classList.remove('running', 'success', 'error');
     planStatus.classList.add(state);
+    planStatus.textContent = message;
   }
 }
 
@@ -796,21 +828,11 @@ function fillAgentMemory(memory = {}, preserveFocus = false) {
 }
 
 function updateSetupStatusFromStorage(items) {
-  const progress = items.profileReadProgress || {};
-  if (items.isAnalyzingCompetitors) {
-    setSetupStatus('账号画像已生成，正在分析竞品和爆款框架...', 'running');
-  } else if (items.isAnalyzingPersona) {
-    setSetupStatus('已读取 X 账号，正在用 AI 生成长期记忆...', 'running');
-  } else if (items.isGenerating) {
-    setSetupStatus('长期记忆已生成，正在准备内容草稿...', 'running');
-  } else if (progress.stage === 'failed') {
-    setSetupStatus(progress.message || '读取失败，请确认 X 已登录后重试。', 'error');
-  } else if (items.competitorReport) {
-    setSetupStatus(items.isRunning ? '设置已完成，Agent 正在运行。' : '分析已完成并自动保存，你可以检查后保存启动。', 'success');
-  } else if (progress.message) {
-    setSetupStatus(progress.message, progress.stage === 'extracted' ? 'success' : 'running');
-  } else {
-    setSetupStatus('等待输入链接');
+  if (sourceAnalysisRunning || sourceAnalysisLocked) return;
+  const sourceInput = document.getElementById('sourceInput')?.value.trim();
+  if (!sourceInput) {
+    setSourceAnalysisStatus('等待输入链接');
+    updateAnalysisSteps(-1);
   }
 }
 

@@ -245,13 +245,6 @@ h1 {
   gap: 10px;
 }
 
-.source-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 14px;
-}
-
 .analysis-panel {
   display: flex;
   flex-direction: column;
@@ -303,14 +296,78 @@ h1 {
   font-size: 12px;
 }
 
-.analysis-steps span::before {
-  content: "";
-  display: inline-block;
+.analysis-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  font-weight: 700;
+}
+
+.analysis-step i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 7px;
   height: 7px;
-  margin-right: 7px;
   border-radius: 999px;
   background: #cfd8e3;
+  color: #fff;
+  font-style: normal;
+  flex: 0 0 auto;
+}
+
+.analysis-step.running {
+  color: var(--primary);
+}
+
+.analysis-step.running i {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(15, 139, 214, 0.22);
+  border-top-color: var(--primary);
+  background: transparent;
+  animation: spin 0.8s linear infinite;
+}
+
+.analysis-step.done {
+  color: var(--text);
+}
+
+.analysis-step.done i {
+  width: 15px;
+  height: 15px;
+  background: var(--success);
+}
+
+.analysis-step.done i::before {
+  content: "✓";
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.analysis-step.error {
+  color: var(--danger);
+}
+
+.analysis-step.error i {
+  width: 15px;
+  height: 15px;
+  background: var(--danger);
+}
+
+.analysis-step.error i::before {
+  content: "!";
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .wizard-panel {
