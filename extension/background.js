@@ -194,6 +194,22 @@ function formatAllGrowthPlaybooks() {
     .join('\n\n');
 }
 
+function formatLeadAsset(strategy = {}) {
+  const assetType = strategy.leadAssetType || 'none';
+  const assetValue = memoryValueToText(strategy.leadAssetValue).trim();
+  if (assetType === 'product') {
+    return assetValue
+      ? `【评论引流资产】产品/工具：${assetValue}。只在上下文强相关时轻量提及，先提供判断和帮助，不硬推。`
+      : '【评论引流资产】产品/工具。尚未填写具体链接或名称，评论时先建立信任，不强行引流。';
+  }
+  if (assetType === 'post') {
+    return assetValue
+      ? `【评论引流资产】高质量帖子/资料：${assetValue}。适合在对方需要延伸阅读时自然引导。`
+      : '【评论引流资产】高质量帖子/资料。尚未填写具体链接或标题，评论时先沉淀关注，不强行引导。';
+  }
+  return '【评论引流资产】暂不设置产品或资料入口。评论目标是高质量互动、主页访问和关注沉淀。';
+}
+
 function visualLength(text = '') {
   return Array.from(text).reduce((sum, char) => sum + (/[\x00-\x7F]/.test(char) ? 0.55 : 1), 0);
 }
@@ -919,7 +935,7 @@ async function generateAIResponse(tweetContent) {
         accountBio: config.accountBio,
         leadTarget: config.leadTarget
       });
-      const personaContext = `\n【你的账号人设与特征】：${config.aiPersona?.characteristics || '未填写'}\n【你的核心引流目标】：${config.aiPersona?.goals || config.leadTarget}\n【你的长期记忆】\n${formatAgentMemory(config.agentMemory)}\n${formatGrowthPlaybook(playbook)}\n请严格符合上述人设、观点边界、内容模板和互动策略进行回复。\n`;
+      const personaContext = `\n【你的账号人设与特征】：${config.aiPersona?.characteristics || '未填写'}\n【你的核心引流目标】：${config.aiPersona?.goals || config.leadTarget}\n${formatLeadAsset(config.onboardingStrategy)}\n【你的长期记忆】\n${formatAgentMemory(config.agentMemory)}\n${formatGrowthPlaybook(playbook)}\n请严格符合上述人设、观点边界、内容模板和互动策略进行回复。\n`;
       
       const prompt = config.promptTemplate
         .replace('{tweet}', tweetContent)
@@ -1052,7 +1068,8 @@ ${playbookCatalog}
 1. 这个账号最可能的增长飞轮是什么：观点传播、实操收藏、故事共鸣、评论截流、产品转化中的哪几个。
 2. 目标用户为什么会关注：情绪价值、工具价值、行业内幕、身份认同、可复制方法中的哪几个。
 3. 第一周内容矩阵：涨粉内容、建信任内容、转化内容、互动钩子内容、人设加深内容。
-4. 爆款热帖风格：必须生成 3 个候选首帖，并按 6 项 1-10 分打分。
+4. 评论引流资产：判断用户是否更适合导向产品/工具、高质量帖子/资料，还是暂不设置引流资产。
+5. 爆款热帖风格：必须生成 3 个候选首帖，并按 6 项 1-10 分打分。
 
 评分维度：
 - hook: 开头是否能让人停住
@@ -1072,6 +1089,8 @@ ${playbookCatalog}
   "content": ["insights", "playbooks"],
   "contentCustom": "",
   "contentMode": "balanced|growth|trust",
+  "leadAssetType": "product|post|none",
+  "leadAssetValue": "产品/工具链接、置顶帖/资料链接或空字符串",
   "postStyle": "concise|story|contrarian",
   "preferredLanguage": "en|ja|ko|zh-CN|zh-TW",
   "targetTimezone": "Asia/Shanghai|America/Los_Angeles|America/New_York|Europe/London|Asia/Tokyo|Asia/Seoul",
@@ -1093,7 +1112,7 @@ ${playbookCatalog}
       "rationale": "为什么这条更可能在 X 上被关注"
     }
   ],
-  "leadTarget": "低压、可信、不硬广的行动入口",
+  "leadTarget": "低压、可信、不硬广的行动入口；如果 leadAssetType 是 none，就强调关注沉淀，不强行引流。",
   "persona": {
     "targetUsers": "...",
     "characteristics": "...",
@@ -1159,6 +1178,8 @@ function normalizeOnboardingAnalysis(parsed = {}, sourceInput = '') {
     content: pickList(parsed.content, ['insights', 'playbooks', 'stories', 'curation', 'softPromo'], ['insights', 'playbooks']),
     contentCustom: memoryValueToText(parsed.contentCustom),
     contentMode: pick(parsed.contentMode, ['balanced', 'growth', 'trust'], 'balanced'),
+    leadAssetType: pick(parsed.leadAssetType, ['product', 'post', 'none'], 'none'),
+    leadAssetValue: memoryValueToText(parsed.leadAssetValue),
     postStyle: pick(parsed.postStyle, ['concise', 'story', 'contrarian'], 'concise'),
     preferredLanguage: pick(parsed.preferredLanguage, ['en', 'ja', 'ko', 'zh-CN', 'zh-TW'], 'zh-CN'),
     targetTimezone: pick(parsed.targetTimezone, ['Asia/Shanghai', 'America/Los_Angeles', 'America/New_York', 'Europe/London', 'Asia/Tokyo', 'Asia/Seoul'], 'Asia/Shanghai'),
@@ -1277,6 +1298,7 @@ ${config.accountBio || '暂无'}
 长期记忆，必须优先遵守：
 ${memoryContext}
 ${playbookContext}
+${formatLeadAsset(config.onboardingStrategy)}
 ${reportContext}
 
 请生成 24 条候选推文，然后只返回你自评后最强的 20 条。必须覆盖以下内容类型：

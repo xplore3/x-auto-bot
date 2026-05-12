@@ -37,6 +37,8 @@ const DEFAULT_ONBOARDING_STRATEGY = {
   content: ['insights', 'playbooks'],
   contentCustom: '',
   contentMode: 'balanced',
+  leadAssetType: 'none',
+  leadAssetValue: '',
   postStyle: 'concise',
   preferredLanguage: 'zh-CN',
   targetTimezone: 'Asia/Shanghai',
@@ -99,6 +101,12 @@ const CONTENT_LABELS = {
   stories: '幕后故事',
   curation: '信息转译',
   softPromo: '产品软推广'
+};
+
+const LEAD_ASSET_LABELS = {
+  product: '产品 / 工具',
+  post: '高质量帖子 / 资料',
+  none: '暂不设置引流资产'
 };
 
 const STYLE_LABELS = {
@@ -327,6 +335,8 @@ function getOnboardingStrategyFromForm() {
     content: getMultiChoiceValues('content'),
     contentCustom: document.getElementById('contentCustom')?.value.trim() || '',
     contentMode: getChoiceValue('contentMode', DEFAULT_ONBOARDING_STRATEGY.contentMode),
+    leadAssetType: getChoiceValue('leadAssetType', DEFAULT_ONBOARDING_STRATEGY.leadAssetType),
+    leadAssetValue: document.getElementById('leadAssetValue')?.value.trim() || '',
     postStyle: getChoiceValue('postStyle', DEFAULT_ONBOARDING_STRATEGY.postStyle),
     preferredLanguage: getChoiceValue('preferredLanguage', DEFAULT_ONBOARDING_STRATEGY.preferredLanguage),
     targetTimezone: document.getElementById('targetTimezone')?.value || DEFAULT_ONBOARDING_STRATEGY.targetTimezone,
@@ -342,6 +352,7 @@ function applyOnboardingStrategy(strategy = {}) {
   document.getElementById('sourceInput').value = merged.sourceInput || '';
   document.getElementById('audienceCustom').value = merged.audienceCustom || '';
   document.getElementById('contentCustom').value = merged.contentCustom || '';
+  document.getElementById('leadAssetValue').value = merged.leadAssetValue || '';
   document.getElementById('targetTimezone').value = merged.targetTimezone || DEFAULT_ONBOARDING_STRATEGY.targetTimezone;
   document.getElementById('growthGoal').value = merged.growthGoal || DEFAULT_ONBOARDING_STRATEGY.growthGoal;
   document.getElementById('firstTweetPreview').value = merged.firstTweetText || '';
@@ -349,6 +360,7 @@ function applyOnboardingStrategy(strategy = {}) {
   setMultiChoices('audience', merged.audience);
   setMultiChoices('content', merged.content);
   selectChoice('contentMode', merged.contentMode);
+  selectChoice('leadAssetType', merged.leadAssetType);
   selectChoice('postStyle', merged.postStyle);
   selectChoice('preferredLanguage', merged.preferredLanguage);
   selectChoice('automationMode', merged.automationMode);
@@ -372,6 +384,26 @@ function getAudienceLabels(strategy) {
 
 function getContentLabels(strategy) {
   return [...labelList(strategy.content, CONTENT_LABELS), ...splitCustomInput(strategy.contentCustom)];
+}
+
+function describeLeadAsset(strategy) {
+  const assetValue = (strategy.leadAssetValue || '').trim();
+  if (strategy.leadAssetType === 'product') {
+    return assetValue
+      ? `评论承接资产：产品/工具（${assetValue}）。评论中只在上下文强相关时轻量提及，优先提供观点和帮助，不硬推。`
+      : '评论承接资产：产品/工具。尚未填写具体链接或名称，评论时先以建立信任为主，不强行引流。';
+  }
+  if (strategy.leadAssetType === 'post') {
+    return assetValue
+      ? `评论承接资产：高质量帖子/资料（${assetValue}）。适合在对方确实需要延伸阅读时自然引导。`
+      : '评论承接资产：高质量帖子/资料。尚未填写具体链接或标题，评论时先沉淀关注，不强行引导。';
+  }
+  return '评论承接资产：暂不设置产品或资料入口。评论目标是获得高质量互动、主页访问和关注沉淀。';
+}
+
+function buildLeadTarget(strategy, content, audience) {
+  const base = `我会围绕 ${content.join('、') || 'AI、出海和个人商业化'} 持续分享可执行的观点和案例，帮助 ${audience.join('、') || '目标用户'} 更快建立判断和行动。`;
+  return `${base}\n${describeLeadAsset(strategy)}`;
 }
 
 function createPlan(strategy) {
@@ -486,7 +518,7 @@ function syncWizardToFields(options = {}) {
   setFieldValue('smartTimeSlots', plan.schedule, overwrite);
   toggleScheduleMode();
 
-  setFieldValue('leadTarget', `我会围绕 ${content.join('、') || 'AI、出海和个人商业化'} 持续分享可执行的观点和案例，帮助 ${audience.join('、') || '目标用户'} 更快建立判断和行动。`, overwrite);
+  setFieldValue('leadTarget', buildLeadTarget(strategy, content, audience), overwrite);
   setFieldValue('aiTargetUsers', audience.join('\n'), overwrite);
   setFieldValue('aiGoals', `${strategy.growthGoal || '首月新增 1000 粉丝'}；用 ${role} 的方式建立信任、获取关注、沉淀潜在客户，并把日常输入转化为稳定内容输出。`, overwrite);
   setFieldValue('aiCharacteristics', `语言：${language}\n账号角色：${role}\n内容策略模板：${archetype}\n默认文案流派：${style}\n内容配比：${plan.mix}\n表达要具体、可信、有判断力，避免空泛鸡血。`, overwrite);
@@ -495,7 +527,7 @@ function syncWizardToFields(options = {}) {
   setFieldValue('firstTweetPreview', firstTweet, overwrite);
 
   const memory = {
-    identity: `来源：${source}\n账号角色：${role}\n内容策略模板：${archetype}\n目标：${strategy.growthGoal || DEFAULT_ONBOARDING_STRATEGY.growthGoal}`,
+    identity: `来源：${source}\n账号角色：${role}\n内容策略模板：${archetype}\n目标：${strategy.growthGoal || DEFAULT_ONBOARDING_STRATEGY.growthGoal}\n${describeLeadAsset(strategy)}`,
     marketPosition: `${role}，用 ${archetype} 的打法和 ${style} 的表达方式，在 ${content.join('、') || '核心赛道'} 中建立清晰、可信、可持续的 X 影响力。`,
     audienceSegments: audience.join('\n'),
     audiencePains: buildAudiencePains(strategy),
@@ -587,7 +619,7 @@ function buildVoiceRules(strategy) {
 
 function buildReplyStrategy(strategy) {
   const audience = getAudienceLabels(strategy).join('、') || '目标用户';
-  return `优先回复 ${audience} 关注的话题。结构：先补充一个具体判断，再给一个经验/例子/反问；只在上下文自然相关时带行动入口，不硬广，不刷屏。`;
+  return `优先回复 ${audience} 关注的话题。结构：先补充一个具体判断，再给一个经验/例子/反问；只在上下文自然相关时带行动入口，不硬广，不刷屏。\n${describeLeadAsset(strategy)}`;
 }
 
 function buildPromptTemplate(strategy) {
@@ -787,6 +819,8 @@ function applySourceAnalysis(analysis) {
     content: Array.isArray(analysis.content) && analysis.content.length ? analysis.content : getOnboardingStrategyFromForm().content,
     contentCustom: analysis.contentCustom || getOnboardingStrategyFromForm().contentCustom,
     contentMode: analysis.contentMode || getOnboardingStrategyFromForm().contentMode,
+    leadAssetType: analysis.leadAssetType || getOnboardingStrategyFromForm().leadAssetType,
+    leadAssetValue: analysis.leadAssetValue || getOnboardingStrategyFromForm().leadAssetValue,
     postStyle: analysis.postStyle || getOnboardingStrategyFromForm().postStyle,
     preferredLanguage: analysis.preferredLanguage || getOnboardingStrategyFromForm().preferredLanguage,
     targetTimezone: analysis.targetTimezone || getOnboardingStrategyFromForm().targetTimezone,
@@ -823,6 +857,8 @@ function createFallbackAnalysis(sourceInput) {
     audience: looksLikeX ? ['founders', 'aiBuilders'] : ['founders', 'indie', 'global'],
     content: looksLikeX ? ['insights', 'curation', 'playbooks'] : ['insights', 'playbooks', 'stories', 'softPromo'],
     contentMode: 'balanced',
+    leadAssetType: 'none',
+    leadAssetValue: '',
     postStyle: looksLikeX ? 'contrarian' : 'concise',
     preferredLanguage: 'zh-CN',
     targetTimezone: 'Asia/Shanghai',
