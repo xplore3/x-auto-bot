@@ -161,6 +161,8 @@ let analysisTimer = null;
 let analysisStartedAt = 0;
 let sourceAnalysisRunning = false;
 let sourceAnalysisLocked = false;
+let optionsRestored = false;
+let autoSaveTimer = null;
 
 function initOptions() {
   bind('saveBtn', 'click', saveOptions);
@@ -175,6 +177,7 @@ function initOptions() {
   bind('targetTimezone', 'change', updatePlanPreview);
   bind('growthGoal', 'input', updatePlanPreview);
   initChoiceCards();
+  initAutoSave();
   restoreOptions();
 }
 
@@ -192,6 +195,7 @@ function initChoiceCards() {
         if (timezone) document.getElementById('targetTimezone').value = timezone;
       }
       updatePlanPreview();
+      scheduleAutoSave();
     });
   });
 
@@ -199,8 +203,44 @@ function initChoiceCards() {
     button.addEventListener('click', () => {
       setButtonSelected(button, !button.classList.contains('is-selected'));
       updatePlanPreview();
+      scheduleAutoSave();
     });
   });
+}
+
+function initAutoSave() {
+  document.addEventListener('input', (event) => {
+    if (event.target.matches('input, textarea')) {
+      scheduleAutoSave();
+    }
+  });
+  document.addEventListener('change', (event) => {
+    if (event.target.matches('select, input, textarea')) {
+      scheduleAutoSave();
+    }
+  });
+}
+
+function scheduleAutoSave() {
+  if (!optionsRestored) return;
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => {
+    saveOptions({ silent: true, skipAutoStart: true, autoSave: true }, () => {
+      showAutoSaveStatus();
+    });
+  }, 900);
+}
+
+function showAutoSaveStatus() {
+  const status = document.getElementById('statusMessage');
+  if (!status) return;
+  status.textContent = '已自动保存';
+  status.style.color = '#65717e';
+  status.classList.add('show');
+  setTimeout(() => {
+    status.classList.remove('show');
+    status.style.color = '';
+  }, 1400);
 }
 
 function setButtonSelected(button, selected) {
@@ -428,9 +468,9 @@ function syncWizardToFields(options = {}) {
   const source = strategy.sourceInput || '尚未输入来源';
   const firstTweet = strategy.firstTweetText || composeFirstTweet(strategy);
 
-  document.getElementById('postsPerDay').value = plan.postsPerDay;
-  document.getElementById('postScheduleMode').value = 'smart';
-  document.getElementById('smartTimeSlots').value = plan.schedule;
+  setFieldValue('postsPerDay', String(plan.postsPerDay), overwrite);
+  setFieldValue('postScheduleMode', 'smart', overwrite);
+  setFieldValue('smartTimeSlots', plan.schedule, overwrite);
   toggleScheduleMode();
 
   setFieldValue('leadTarget', `我会围绕 ${content.join('、') || 'AI、出海和个人商业化'} 持续分享可执行的观点和案例，帮助 ${audience.join('、') || '目标用户'} 更快建立判断和行动。`, overwrite);
@@ -602,6 +642,7 @@ function buildGrowthPlan(options = {}) {
     document.getElementById('testPostText').value = document.getElementById('firstTweetPreview').value;
     stopPlanProgress('涨粉计划已生成，可应用到 Agent 记忆。', 'success');
     updatePlanPreview();
+    scheduleAutoSave();
   }, 800);
 }
 
@@ -913,6 +954,7 @@ function restoreOptions() {
     toggleModelInput();
     toggleScheduleMode();
     updateSetupStatusFromStorage(items);
+    optionsRestored = true;
   });
 }
 
