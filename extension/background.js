@@ -72,6 +72,68 @@ function formatAgentMemory(memory = {}) {
   return sections.length > 0 ? sections.join('\n\n') : '暂无长期记忆。';
 }
 
+function scoreNumber(value, fallback = 6) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(1, Math.min(10, n));
+}
+
+function scoreObject(scores = {}) {
+  return {
+    hook: scoreNumber(scores.hook),
+    shareability: scoreNumber(scores.shareability),
+    replyTrigger: scoreNumber(scores.replyTrigger),
+    identity: scoreNumber(scores.identity),
+    audienceFit: scoreNumber(scores.audienceFit),
+    nativeX: scoreNumber(scores.nativeX)
+  };
+}
+
+function totalViralScore(scores = {}) {
+  const s = scoreObject(scores);
+  return s.hook + s.shareability + s.replyTrigger + s.identity + s.audienceFit + s.nativeX;
+}
+
+function bestViralCandidate(candidates = [], fallback = '') {
+  if (!Array.isArray(candidates) || candidates.length === 0) return fallback;
+  const normalized = candidates
+    .map(candidate => ({
+      text: memoryValueToText(candidate?.text || candidate),
+      scores: scoreObject(candidate?.scores || {}),
+      rationale: memoryValueToText(candidate?.rationale)
+    }))
+    .filter(candidate => candidate.text);
+
+  normalized.sort((a, b) => totalViralScore(b.scores) - totalViralScore(a.scores));
+  return normalized[0]?.text || fallback;
+}
+
+function normalizeGeneratedTweets(parsed) {
+  const rawItems = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.tweets) ? parsed.tweets : []);
+  return rawItems
+    .map(item => {
+      if (typeof item === 'string') {
+        return {
+          text: item.trim(),
+          type: 'unknown',
+          scores: scoreObject({}),
+          score: totalViralScore({})
+        };
+      }
+
+      const scores = scoreObject(item?.scores || {});
+      return {
+        text: memoryValueToText(item?.text).trim(),
+        type: memoryValueToText(item?.type || item?.contentType || 'unknown'),
+        scores,
+        score: totalViralScore(scores)
+      };
+    })
+    .filter(item => item.text)
+    .filter(item => item.text.length <= 1000)
+    .sort((a, b) => b.score - a.score);
+}
+
 function addLog(level, message) {
   const entry = {
     time: Date.now(),
@@ -672,7 +734,12 @@ async function analyzeAccountPersona(bio) {
     }
     addLog('info', '开始 AI 账号画像分析...');
     
-    const prompt = `请把以下 X/Twitter 账号简介，重构成一个“个人发声 Agent 的长期记忆”。
+    const prompt = `你是 X/Twitter 增长操盘手，请把以下账号主页信息重构成一个“个人发声 Agent 的长期记忆”。
+你不是普通品牌顾问。你的判断必须围绕：
+- 这个账号靠什么被关注
+- 哪类内容负责涨粉、建信任、转化、互动截流、人设加深
+- 目标用户为什么会停留、转发、评论、收藏
+- 账号应该避免哪些会降低可信度或触发风险的表达
 
 账号简介：
 ${bio || '暂无'}
@@ -680,6 +747,7 @@ ${bio || '暂无'}
 产品目标用户是：想在 X 上建立影响力的创始人、独立开发者、出海从业者、AI 工具人、投资/研究人员；以及有想法但输出不稳定、会刷 X 但不会把输入转化为观点和内容、强烈想做 KOL 的人。
 
 请基于账号简介推断，但不要编造具体履历、收益、身份头衔或不可验证案例。输出要可直接填入设置页。
+写法要像给 X 账号操盘用的作战记忆，不要像简历总结或咨询报告。
 
 不要包含任何多余文字，严格以如下 JSON 对象格式返回：
 {
@@ -742,7 +810,12 @@ async function analyzeOnboardingSource(sourceInput) {
         return;
       }
 
-      const prompt = `你是世界级 AI 产品经理和 X 增长策略专家。
+      const prompt = `你是一个真正懂 X/Twitter 推荐机制和中文/英文科技圈传播的账号增长操盘手，不是普通市场顾问。
+你的工作方式：
+- 先判断账号能靠什么被转发、被评论、被收藏、被关注。
+- 所有建议都要服务于 X 上的流量结构：Hook 强度、身份标签、争议/反常识、收藏价值、评论诱因、转化路径。
+- 输出必须像给一个创始人或 KOL 的实战作战台，而不是咨询报告。
+
 请根据用户输入的产品网站、X 主页、竞品网站或希望模仿的账号，设计一套“X 发声 Agent 启动向导”的初始策略。
 
 用户输入：
@@ -753,16 +826,31 @@ ${source}
 请遵守：
 - 如果无法真实访问链接，不要编造具体数据、融资、客户、收益、产品功能。
 - 可以基于 URL、handle、行业关键词进行保守推断。
-- 输出要用于前端多选卡片确认，而不是长篇报告。
+- 输出要用于前端多选卡片确认，同时必须体现“流量操盘手”的判断。
 - 不做收益承诺，不建议擦边、政治动员或刷屏。
+- 不要写公众号腔、品牌公关腔、咨询报告腔。要像 X 原生表达：短、具体、有判断、有传播点。
+
+你必须内部完成以下判断：
+1. 这个账号最可能的增长飞轮是什么：观点传播、实操收藏、故事共鸣、评论截流、产品转化中的哪几个。
+2. 目标用户为什么会关注：情绪价值、工具价值、行业内幕、身份认同、可复制方法中的哪几个。
+3. 第一周内容矩阵：涨粉内容、建信任内容、转化内容、互动钩子内容、人设加深内容。
+4. 爆款热帖风格：必须生成 3 个候选首帖，并按 6 项 1-10 分打分。
+
+评分维度：
+- hook: 开头是否能让人停住
+- shareability: 是否有转发理由
+- replyTrigger: 是否能引发评论
+- identity: 是否强化账号身份标签
+- audienceFit: 是否精准击中目标用户
+- nativeX: 是否像 X 原生表达
 
 只能返回 JSON 对象，格式如下：
 {
   "sourceInput": "${source.replace(/"/g, '\\"')}",
   "accountUse": "brand|evangelist|curator|kol",
-  "audience": ["founders|indie|global|aiBuilders|researchers"],
+  "audience": ["founders", "indie"],
   "audienceCustom": "",
-  "content": ["insights|playbooks|stories|curation|softPromo"],
+  "content": ["insights", "playbooks"],
   "contentCustom": "",
   "contentMode": "balanced|growth|trust",
   "postStyle": "concise|story|contrarian",
@@ -770,7 +858,22 @@ ${source}
   "targetTimezone": "Asia/Shanghai|America/Los_Angeles|America/New_York|Europe/London|Asia/Tokyo|Asia/Seoul",
   "growthGoal": "首月新增 1000 粉丝",
   "automationMode": "review",
-  "firstTweetText": "一条可直接作为第一条推文的内容",
+  "firstTweetText": "从 firstTweetCandidates 中选择总分最高的一条",
+  "firstTweetCandidates": [
+    {
+      "text": "候选首帖 1",
+      "style": "concise|story|contrarian",
+      "scores": {
+        "hook": 8,
+        "shareability": 8,
+        "replyTrigger": 7,
+        "identity": 8,
+        "audienceFit": 9,
+        "nativeX": 9
+      },
+      "rationale": "为什么这条更可能在 X 上被关注"
+    }
+  ],
   "leadTarget": "低压、可信、不硬广的行动入口",
   "persona": {
     "targetUsers": "...",
@@ -795,7 +898,7 @@ ${source}
     "sourceInputs": "...",
     "weeklyReviewSignals": "..."
   },
-  "competitorReport": "简短 Markdown：推荐观察的账号类型、低粉爆款钩子、第一周执行建议"
+  "competitorReport": "Markdown，必须包含：流量假设、第一周内容矩阵、低粉爆款钩子、互动截流策略、风险边界。"
 }`;
 
       try {
@@ -835,7 +938,8 @@ function normalizeOnboardingAnalysis(parsed = {}, sourceInput = '') {
     targetTimezone: pick(parsed.targetTimezone, ['Asia/Shanghai', 'America/Los_Angeles', 'America/New_York', 'Europe/London', 'Asia/Tokyo', 'Asia/Seoul'], 'Asia/Shanghai'),
     growthGoal: memoryValueToText(parsed.growthGoal) || '首月新增 1000 粉丝',
     automationMode: pick(parsed.automationMode, ['auto', 'review', 'shadowReply'], 'review'),
-    firstTweetText: memoryValueToText(parsed.firstTweetText),
+    firstTweetText: bestViralCandidate(parsed.firstTweetCandidates, memoryValueToText(parsed.firstTweetText)),
+    firstTweetCandidates: Array.isArray(parsed.firstTweetCandidates) ? parsed.firstTweetCandidates : [],
     leadTarget: memoryValueToText(parsed.leadTarget),
     persona: {
       targetUsers: memoryValueToText(parsed.persona?.targetUsers),
@@ -857,18 +961,22 @@ async function analyzeCompetitors(persona, agentMemoryOverride) {
     }
     addLog('info', '开始竞品对标与爆款策略分析...');
     
-    const prompt = `基于以下 Twitter 账号的定位：
+    const prompt = `你是 X 增长操盘手，正在为一个低粉账号设计“可执行的爆款拆解与截流计划”。
+
+账号定位：
 - 目标用户：${persona.targetUsers}
 - 发文特征：${persona.characteristics}
 - 核心目标：${persona.goals}
 - 长期记忆：
 ${formatAgentMemory(agentMemoryOverride || config.agentMemory)}
 
-作为顶级社交媒体运营专家，请生成一份详尽的《竞品对标与低粉爆款运营拆解报告》。
-报告内容必须包括：
-1. 【优质竞品对标】：列出 10 个类似赛道的优质竞品账号（包括头部大V和起步期账号），并一句话总结每个账号的运营亮点。
-2. 【低粉爆款拆解】：深度拆解在当前赛道下，“低粉账号”想要制造爆款的 3 个核心内容框架和钩子（Hook）设计套路。
-3. 【实操指导】：给出 3 条马上可以落地的执行建议。
+报告必须像操盘文档，不要像市场报告。必须包含：
+1. 【流量假设】：这个账号靠什么被转发、收藏、评论、关注，各写 1 条。
+2. 【对标账号类型】：列出 10 个应观察的账号类型或具体账号方向，说明他们的钩子来源、互动方式和可借鉴点。
+3. 【低粉爆款框架】：给 5 个框架，每个包含 Hook 模板、正文结构、评论诱因、适合内容类型。
+4. 【第一周执行矩阵】：涨粉内容、建信任内容、转化内容、互动钩子内容、人设加深内容，每类给 2 个选题。
+5. 【评论截流策略】：在哪些大 V/赛道话题下面评论、评论结构怎么写、什么情况下不要评论。
+6. 【风险边界】：不要承诺收益、不要编造案例、不要刷屏、不要碰擦边/政治动员。
 
 请直接返回纯 Markdown 格式的报告内容，不要包裹在JSON里，也不要加额外的问候语。`;
 
@@ -911,31 +1019,78 @@ async function generateAutoDrafts() {
     
     const persona = config.aiPersona;
     const memoryContext = formatAgentMemory(config.agentMemory);
-    const reportContext = config.competitorReport ? `\n另外，系统已经为您拆解了竞品和低粉爆款的套路，请【严格应用】以下套路来撰写推文：\n${config.competitorReport}\n` : "";
+    const reportContext = config.competitorReport ? `\n可用的流量操盘报告如下，必须严格吸收其中的钩子、矩阵和风险边界：\n${config.competitorReport}\n` : "";
     
-    const prompt = `你是这个 Twitter 账号的运营者。账号简介：【${config.accountBio}】。
-以下是系统对你的账号画像定位：
+    const prompt = `你是这个账号的 X 内容操盘手，目标不是“写得完整”，而是写出更像 X 原生内容、能被停留/转发/评论/关注的候选推文。
+
+账号简介：
+${config.accountBio || '暂无'}
+
+账号画像定位：
 - 目标用户：${persona.targetUsers}
 - 发文特征与语气：${persona.characteristics}
 - 核心发文目标：${persona.goals}
 
-以下是这个账号的长期记忆，必须优先遵守：
+长期记忆，必须优先遵守：
 ${memoryContext}
 ${reportContext}
-请你完全接管内容创作，直接为我生成 20 条极具网感的高质量推文（可以包含适当的emoji，高度符合上述的人设和业务目标）。
-必须采用上述“低粉爆款”的钩子（Hook）套路和内容框架！
-不要包含任何其他解释性文字，严格以 JSON 数组格式返回（每项是一条字符串格式的推文内容）。
-例如：["推文1", "推文2"]`;
+
+请生成 24 条候选推文，然后只返回你自评后最强的 20 条。必须覆盖以下内容类型：
+- opinion: 6 条，强观点/反常识/行业判断，用于涨粉和转发
+- playbook: 5 条，框架/清单/工具/步骤，用于收藏和信任
+- story: 4 条，经历/复盘/Build in Public，用于人设和共鸣
+- reply_bait: 3 条，能引发评论或站队的问题/判断
+- soft_conversion: 2 条，低压产品/服务/行动入口，不硬广
+
+每条推文必须像 X 原生表达：
+- 开头第一行必须有 Hook，不要铺垫。
+- 一条推文只讲一个判断。
+- 少形容词，多具体场景、数字、对比、动作。
+- 可以适度换行，但不要写成公众号段落。
+- 不要承诺收益，不要编造客户/融资/数据，不要使用擦边或政治动员。
+
+给每条内容按 1-10 分自评：
+- hook: 开头是否能让人停住
+- shareability: 是否有转发理由
+- replyTrigger: 是否能引发评论
+- identity: 是否强化账号身份标签
+- audienceFit: 是否精准击中目标用户
+- nativeX: 是否像 X 原生表达
+
+严格只返回 JSON 对象，不要额外解释：
+{
+  "tweets": [
+    {
+      "type": "opinion|playbook|story|reply_bait|soft_conversion",
+      "text": "推文正文",
+      "scores": {
+        "hook": 8,
+        "shareability": 8,
+        "replyTrigger": 7,
+        "identity": 8,
+        "audienceFit": 9,
+        "nativeX": 9
+      }
+    }
+  ]
+}`;
     
     try {
       const generatedText = await callLLM(prompt, config, true);
       // Clean up markdown code blocks if the model wrapped it
       const cleanJsonStr = generatedText.replace(/```json/g, '').replace(/```/g, '').trim();
-      const newTweets = JSON.parse(cleanJsonStr);
+      const parsedTweets = JSON.parse(cleanJsonStr);
+      const newTweets = normalizeGeneratedTweets(parsedTweets).slice(0, 20);
       
-      if (Array.isArray(newTweets)) {
+      if (newTweets.length > 0) {
         newTweets.forEach(t => {
-           queue.push({ id: Date.now() + Math.random(), text: t });
+           queue.push({
+             id: Date.now() + Math.random(),
+             text: t.text,
+             type: t.type,
+             viralScore: t.score,
+             scores: t.scores
+           });
         });
         chrome.storage.local.set({ tweetQueue: queue, isGenerating: false }, () => {
            addLog('success', `成功生成 ${newTweets.length} 条推文草稿`);

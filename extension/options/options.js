@@ -549,36 +549,46 @@ function buildPromptTemplate(strategy) {
 function composeFirstTweet(strategy) {
   const content = getContentLabels(strategy);
   const audience = getAudienceLabels(strategy);
-  const sourceLine = strategy.sourceInput ? `\n\n我会以 ${strategy.sourceInput} 为起点，持续记录真实观察。` : '';
+  const contentText = content.join('、') || 'AI、出海和增长';
+  const audienceText = audience.join('、') || '创始人和独立开发者';
+  const sourceLine = strategy.sourceInput ? `\n\n我会拿 ${strategy.sourceInput} 做第一批样本。` : '';
   if (strategy.postStyle === 'story') {
-    return `很多人想在 X 上建立影响力，但第一步就做错了。
+    return `我见过太多人把 X 当朋友圈发。
 
-他们先问“我该发什么”，却没有先定义：
-谁需要我？
-他们为什么关注我？
-我能持续提供什么判断？
+结果是：
+每天都有想法
+但没有一个能变成关注
 
-接下来我会围绕 ${content.join('、') || 'AI、出海和增长'}，把输入变成稳定输出。${sourceLine}`;
+问题不在表达欲。
+问题在没有内容系统。
+
+接下来我会围绕 ${contentText}，公开测试一套从输入到涨粉的 X 发声流程。${sourceLine}`;
   }
   if (strategy.postStyle === 'contrarian') {
-    return `大多数账号做不起来，不是因为不会写。
+    return `大多数账号不是死在内容差。
 
-而是没有内容系统：
-目标用户不清楚
-观点资产没沉淀
-互动对象不聚焦
-发布节奏不稳定
+是死在“每条内容都像临时起意”。
 
-我接下来会围绕 ${audience.join('、') || '创始人和独立开发者'}，公开测试一套 X 发声系统。`;
+真正能涨粉的账号，至少有 5 个固定资产：
+目标用户
+强观点
+内容矩阵
+互动对象
+复盘机制
+
+我接下来会围绕 ${audienceText}，公开拆这套系统。`;
   }
   return `想把 X 做起来，别先追热点。
 
-先搭 3 个东西：
-1. 明确目标用户
-2. 沉淀长期观点
-3. 固定内容配比和发布时间
+先搭一个内容飞轮：
 
-我接下来会围绕 ${content.join('、') || 'AI、出海和搞钱'}，持续输出可执行的观察。`;
+1. 用观点贴涨粉
+2. 用干货贴建信任
+3. 用故事贴做人设
+4. 用评论去截流
+5. 用复盘筛出爆款
+
+接下来我会围绕 ${contentText}，持续测试这套方法。`;
 }
 
 function buildGrowthPlan(options = {}) {
