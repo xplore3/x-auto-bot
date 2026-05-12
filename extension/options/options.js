@@ -30,6 +30,7 @@ const DEFAULT_AGENT_MEMORY = {
 
 const DEFAULT_ONBOARDING_STRATEGY = {
   sourceInput: '',
+  strategyArchetype: 'indie_builder',
   accountUse: 'brand',
   audience: ['founders', 'indie'],
   audienceCustom: '',
@@ -106,6 +107,14 @@ const STYLE_LABELS = {
   contrarian: '观点对抗流'
 };
 
+const STRATEGY_ARCHETYPE_LABELS = {
+  ai_product_kol: 'AI / 产品型 KOL',
+  monetization_global: '出海 / 搞钱 / 个人商业化',
+  indie_builder: '独立开发者 / Build in Public',
+  research_growth: '产品增长 / 投资研究型账号',
+  brand_official: '产品官方品牌号'
+};
+
 const LANGUAGE_LABELS = {
   en: '英语',
   ja: '日语',
@@ -163,6 +172,7 @@ let sourceAnalysisRunning = false;
 let sourceAnalysisLocked = false;
 let optionsRestored = false;
 let autoSaveTimer = null;
+let retainedStrategyArchetype = DEFAULT_ONBOARDING_STRATEGY.strategyArchetype;
 
 function initOptions() {
   bind('saveBtn', 'click', saveOptions);
@@ -310,6 +320,7 @@ function showStatus(message, color = '#17bf63', timeout = 3000) {
 function getOnboardingStrategyFromForm() {
   return {
     sourceInput: document.getElementById('sourceInput')?.value.trim() || '',
+    strategyArchetype: retainedStrategyArchetype || DEFAULT_ONBOARDING_STRATEGY.strategyArchetype,
     accountUse: getChoiceValue('accountUse', DEFAULT_ONBOARDING_STRATEGY.accountUse),
     audience: getMultiChoiceValues('audience'),
     audienceCustom: document.getElementById('audienceCustom')?.value.trim() || '',
@@ -327,6 +338,7 @@ function getOnboardingStrategyFromForm() {
 
 function applyOnboardingStrategy(strategy = {}) {
   const merged = { ...DEFAULT_ONBOARDING_STRATEGY, ...(strategy || {}) };
+  retainedStrategyArchetype = merged.strategyArchetype || DEFAULT_ONBOARDING_STRATEGY.strategyArchetype;
   document.getElementById('sourceInput').value = merged.sourceInput || '';
   document.getElementById('audienceCustom').value = merged.audienceCustom || '';
   document.getElementById('contentCustom').value = merged.contentCustom || '';
@@ -464,6 +476,7 @@ function syncWizardToFields(options = {}) {
   const content = getContentLabels(strategy);
   const role = ACCOUNT_USE_LABELS[strategy.accountUse] || ACCOUNT_USE_LABELS.brand;
   const style = STYLE_LABELS[strategy.postStyle] || STYLE_LABELS.concise;
+  const archetype = STRATEGY_ARCHETYPE_LABELS[strategy.strategyArchetype] || STRATEGY_ARCHETYPE_LABELS.indie_builder;
   const language = LANGUAGE_LABELS[strategy.preferredLanguage] || LANGUAGE_LABELS['zh-CN'];
   const source = strategy.sourceInput || '尚未输入来源';
   const firstTweet = strategy.firstTweetText || composeFirstTweet(strategy);
@@ -476,14 +489,14 @@ function syncWizardToFields(options = {}) {
   setFieldValue('leadTarget', `我会围绕 ${content.join('、') || 'AI、出海和个人商业化'} 持续分享可执行的观点和案例，帮助 ${audience.join('、') || '目标用户'} 更快建立判断和行动。`, overwrite);
   setFieldValue('aiTargetUsers', audience.join('\n'), overwrite);
   setFieldValue('aiGoals', `${strategy.growthGoal || '首月新增 1000 粉丝'}；用 ${role} 的方式建立信任、获取关注、沉淀潜在客户，并把日常输入转化为稳定内容输出。`, overwrite);
-  setFieldValue('aiCharacteristics', `语言：${language}\n账号角色：${role}\n默认文案流派：${style}\n内容配比：${plan.mix}\n表达要具体、可信、有判断力，避免空泛鸡血。`, overwrite);
+  setFieldValue('aiCharacteristics', `语言：${language}\n账号角色：${role}\n内容策略模板：${archetype}\n默认文案流派：${style}\n内容配比：${plan.mix}\n表达要具体、可信、有判断力，避免空泛鸡血。`, overwrite);
   setFieldValue('targetUsers', extractSourceHandles(source), overwrite);
   setFieldValue('testPostText', firstTweet, overwrite);
   setFieldValue('firstTweetPreview', firstTweet, overwrite);
 
   const memory = {
-    identity: `来源：${source}\n账号角色：${role}\n目标：${strategy.growthGoal || DEFAULT_ONBOARDING_STRATEGY.growthGoal}`,
-    marketPosition: `${role}，用 ${style} 的表达方式，在 ${content.join('、') || '核心赛道'} 中建立清晰、可信、可持续的 X 影响力。`,
+    identity: `来源：${source}\n账号角色：${role}\n内容策略模板：${archetype}\n目标：${strategy.growthGoal || DEFAULT_ONBOARDING_STRATEGY.growthGoal}`,
+    marketPosition: `${role}，用 ${archetype} 的打法和 ${style} 的表达方式，在 ${content.join('、') || '核心赛道'} 中建立清晰、可信、可持续的 X 影响力。`,
     audienceSegments: audience.join('\n'),
     audiencePains: buildAudiencePains(strategy),
     contentPillars: content.join('\n'),
@@ -559,7 +572,12 @@ function buildCoreOpinions(strategy) {
 function buildVoiceRules(strategy) {
   const language = LANGUAGE_LABELS[strategy.preferredLanguage] || LANGUAGE_LABELS['zh-CN'];
   const style = STYLE_LABELS[strategy.postStyle] || STYLE_LABELS.concise;
-  const lines = [`优先使用${language}。`, `默认采用${style}。`, '先结论后解释；少形容词，多具体例子；每条内容只表达一个核心观点。'];
+  const lines = [
+    `优先使用${language}。`,
+    `默认采用${style}。`,
+    '先结论后解释；少形容词，多具体例子；每条内容只表达一个核心观点。',
+    '中文短推默认手动换行：Hook 单独一行，长句按 28-36 个汉字切分，逻辑块之间留空行。'
+  ];
   if (strategy.accountUse === 'brand') lines.push('品牌号保持专业、克制，避免过强个人情绪。');
   if (strategy.accountUse === 'evangelist') lines.push('首席推销官可以更有热情，但必须用事实和案例支撑。');
   if (strategy.accountUse === 'curator') lines.push('观察家要多总结、多转译、多补充判断。');
@@ -762,6 +780,7 @@ function applySourceAnalysis(analysis) {
   const strategy = {
     ...getOnboardingStrategyFromForm(),
     sourceInput: analysis.sourceInput || document.getElementById('sourceInput').value.trim(),
+    strategyArchetype: analysis.strategyArchetype || getOnboardingStrategyFromForm().strategyArchetype,
     accountUse: analysis.accountUse || getOnboardingStrategyFromForm().accountUse,
     audience: Array.isArray(analysis.audience) && analysis.audience.length ? analysis.audience : getOnboardingStrategyFromForm().audience,
     audienceCustom: analysis.audienceCustom || getOnboardingStrategyFromForm().audienceCustom,
@@ -792,8 +811,14 @@ function applySourceAnalysis(analysis) {
 
 function createFallbackAnalysis(sourceInput) {
   const looksLikeX = /(?:x|twitter)\.com\/|^@?[A-Za-z0-9_]{1,15}$/.test(sourceInput);
+  const sourceLower = sourceInput.toLowerCase();
+  let strategyArchetype = looksLikeX ? 'ai_product_kol' : 'indie_builder';
+  if (/leobai825|levelsio|搞钱|副业|出海|变现/.test(sourceLower)) strategyArchetype = 'monetization_global';
+  if (/zarazhangrui|swyx|aakashg0|ai|agent|人工智能/.test(sourceLower)) strategyArchetype = 'ai_product_kol';
+  if (/shreyas|packym|投资|研究|增长/.test(sourceLower)) strategyArchetype = 'research_growth';
   return {
     sourceInput,
+    strategyArchetype,
     accountUse: looksLikeX ? 'kol' : 'evangelist',
     audience: looksLikeX ? ['founders', 'aiBuilders'] : ['founders', 'indie', 'global'],
     content: looksLikeX ? ['insights', 'curation', 'playbooks'] : ['insights', 'playbooks', 'stories', 'softPromo'],

@@ -72,6 +72,206 @@ function formatAgentMemory(memory = {}) {
   return sections.length > 0 ? sections.join('\n\n') : '暂无长期记忆。';
 }
 
+const GROWTH_PLAYBOOKS = {
+  ai_product_kol: {
+    id: 'ai_product_kol',
+    label: 'AI / 产品型 KOL',
+    triggers: ['ai', 'agent', '人工智能', '工具', '自动化', 'prompt', '产品', 'zarazhangrui', 'swyx', 'aakashg0', 'lennysan'],
+    references: ['@zarazhangrui', '@swyx', '@aakashg0', '@lennysan'],
+    method: [
+      '把抽象趋势翻译成具体工作流：工具、场景、成本、结果。',
+      '用强判断开头，再给一个可验证的案例或操作步骤。',
+      '多做产品拆解、工作流拆解、失败复盘和“我会怎么做”。',
+      '避免百科式科普，必须让读者觉得这条能立刻改变判断或行动。'
+    ],
+    mix: '35% 强观点 / 35% 实操工作流 / 20% 产品拆解 / 10% 互动问题'
+  },
+  monetization_global: {
+    id: 'monetization_global',
+    label: '出海 / 搞钱 / 个人商业化',
+    triggers: ['出海', '搞钱', '副业', '变现', '海外', 'monetization', 'income', '赚钱', 'leobai825', 'levelsio', 'dvassallo', 'codie_sanchez'],
+    references: ['@Leobai825', '@levelsio', '@dvassallo', '@codie_sanchez'],
+    method: [
+      '先讲机会差，再讲谁会付费、交付什么、如何降低交付成本。',
+      '用案例和路径替代收益承诺，所有数字都必须是可验证或明确假设。',
+      '把内容写成“避坑 + 路径 + 行动清单”，让读者收藏和转发给同类人。',
+      '强 CTA 只放在自然相关处，不制造焦虑，不暗示稳赚。'
+    ],
+    mix: '40% 机会判断 / 30% 变现路径 / 20% 案例复盘 / 10% 低压转化'
+  },
+  indie_builder: {
+    id: 'indie_builder',
+    label: '独立开发者 / Build in Public',
+    triggers: ['indie', '独立开发', 'build in public', 'mrr', 'saas', '开发者', 'solo', 'marckohlbrugge', 'patio11', 'robj3d3'],
+    references: ['@levelsio', '@marckohlbrugge', '@patio11', '@robj3d3'],
+    method: [
+      '公开真实过程：今天 ship 了什么、遇到什么问题、学到什么。',
+      '用小结果、小实验、小失败形成连续剧，而不是只发发布公告。',
+      '少讲宏大愿景，多讲截图、用户反馈、定价、转化、留存和取舍。',
+      '把产品故事写成人能共情的选择题：为什么这么做，不这么做会怎样。'
+    ],
+    mix: '35% 构建日志 / 25% 产品故事 / 25% 增长实验 / 15% 教训复盘'
+  },
+  research_growth: {
+    id: 'research_growth',
+    label: '产品增长 / 投资研究型账号',
+    triggers: ['研究', '投资', '增长', '产品经理', 'research', 'vc', 'market', '趋势', 'shreyas', 'packym'],
+    references: ['@aakashg0', '@lennysan', '@shreyas', '@packyM'],
+    method: [
+      '用结构化框架降低信息噪音：市场地图、决策树、对比表、反共识。',
+      '每条内容先给结论，再给证据链，最后给读者一个判断标准。',
+      '把热点变成“这意味着什么”，而不是复述新闻。',
+      '用收藏价值建信任，用少量鲜明观点制造传播。'
+    ],
+    mix: '35% 趋势判断 / 30% 框架清单 / 20% 案例拆解 / 15% 观点讨论'
+  },
+  brand_official: {
+    id: 'brand_official',
+    label: '产品官方品牌号',
+    triggers: ['brand', 'official', '官网', '产品', '公司', 'startup', 'saas'],
+    references: ['@OpenAI', '@NotionHQ', '@Linear', '@vercel'],
+    method: [
+      '把功能更新写成用户问题被解决的故事，不写冷冰冰公告。',
+      '用客户场景、模板、教程、案例建立产品可信度。',
+      '语气专业克制，但要有人味：解释取舍、展示幕后、邀请反馈。',
+      '品牌号少争议，多清晰；少口号，多可操作。'
+    ],
+    mix: '35% 用户场景 / 25% 产品教育 / 20% 发布故事 / 20% 客户证明'
+  }
+};
+
+function collectSignalText(...items) {
+  return items
+    .map(item => memoryValueToText(item))
+    .join('\n')
+    .toLowerCase();
+}
+
+function includesAny(text, words = []) {
+  return words.some(word => text.includes(String(word).toLowerCase()));
+}
+
+function selectGrowthPlaybook(context = {}) {
+  const strategy = context.onboardingStrategy || {};
+  const persona = context.persona || context.aiPersona || {};
+  const memory = normalizeAgentMemory(context.agentMemory || {});
+  const signalText = collectSignalText(
+    strategy,
+    persona,
+    memory,
+    context.accountBio,
+    context.leadTarget,
+    context.sourceInput
+  );
+
+  if (strategy.strategyArchetype && GROWTH_PLAYBOOKS[strategy.strategyArchetype]) {
+    return GROWTH_PLAYBOOKS[strategy.strategyArchetype];
+  }
+  if (strategy.accountUse === 'brand') return GROWTH_PLAYBOOKS.brand_official;
+  if (includesAny(signalText, GROWTH_PLAYBOOKS.monetization_global.triggers)) return GROWTH_PLAYBOOKS.monetization_global;
+  if (includesAny(signalText, GROWTH_PLAYBOOKS.indie_builder.triggers)) return GROWTH_PLAYBOOKS.indie_builder;
+  if (includesAny(signalText, GROWTH_PLAYBOOKS.research_growth.triggers)) return GROWTH_PLAYBOOKS.research_growth;
+  if (includesAny(signalText, GROWTH_PLAYBOOKS.ai_product_kol.triggers)) return GROWTH_PLAYBOOKS.ai_product_kol;
+  return strategy.accountUse === 'kol' ? GROWTH_PLAYBOOKS.ai_product_kol : GROWTH_PLAYBOOKS.indie_builder;
+}
+
+function formatGrowthPlaybook(playbook) {
+  if (!playbook) return '';
+  return `【当前内容增长模板】${playbook.label}
+参考账号：${playbook.references.join('、')}
+方法论：
+${playbook.method.map(item => `- ${item}`).join('\n')}
+建议内容配比：${playbook.mix}
+注意：只学习结构和方法，不仿写具体原文，不编造这些账号的经历。`;
+}
+
+function formatAllGrowthPlaybooks() {
+  return Object.values(GROWTH_PLAYBOOKS)
+    .map(playbook => `${playbook.id}：${playbook.label}
+参考账号：${playbook.references.join('、')}
+方法论：${playbook.method.join('；')}
+内容配比：${playbook.mix}`)
+    .join('\n\n');
+}
+
+function visualLength(text = '') {
+  return Array.from(text).reduce((sum, char) => sum + (/[\x00-\x7F]/.test(char) ? 0.55 : 1), 0);
+}
+
+function hardSplitLine(line, maxLength) {
+  const parts = [];
+  let current = '';
+  Array.from(line).forEach((char) => {
+    if (visualLength(current + char) > maxLength && current) {
+      parts.push(current.trim());
+      current = char;
+    } else {
+      current += char;
+    }
+  });
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
+function splitTweetLine(line, maxLength = 34) {
+  const trimmed = line.trim();
+  if (!trimmed) return [];
+  if (visualLength(trimmed) <= maxLength) return [trimmed];
+  if (/^https?:\/\//i.test(trimmed)) return [trimmed];
+
+  const tokens = trimmed.match(/[^，。！？；：,.!?;:]+[，。！？；：,.!?;:]?/g) || [trimmed];
+  const lines = [];
+  let current = '';
+
+  tokens.forEach((token) => {
+    const next = `${current}${token}`.trim();
+    if (current && visualLength(next) > maxLength) {
+      lines.push(current.trim());
+      current = token.trim();
+    } else {
+      current = next;
+    }
+  });
+  if (current.trim()) lines.push(current.trim());
+
+  return lines.flatMap(part => visualLength(part) > maxLength * 1.25 ? hardSplitLine(part, maxLength) : [part]);
+}
+
+function formatTweetForX(text = '') {
+  const raw = memoryValueToText(text)
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .trim();
+  if (!raw) return '';
+
+  const paragraphs = raw
+    .split(/\n{2,}/)
+    .map(paragraph => paragraph.trim())
+    .filter(Boolean);
+
+  const formatted = paragraphs.map((paragraph) => {
+    const lines = paragraph
+      .split('\n')
+      .flatMap(line => splitTweetLine(line))
+      .filter(Boolean);
+
+    if (!paragraph.includes('\n') && lines.length >= 3) {
+      const [hook, ...body] = lines;
+      const grouped = [];
+      body.forEach((line, index) => {
+        grouped.push(line);
+        if ((index + 1) % 3 === 0 && index < body.length - 1) grouped.push('');
+      });
+      return [hook, '', ...grouped].join('\n');
+    }
+
+    return lines.join('\n');
+  });
+
+  return formatted.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 function scoreNumber(value, fallback = 6) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -95,17 +295,17 @@ function totalViralScore(scores = {}) {
 }
 
 function bestViralCandidate(candidates = [], fallback = '') {
-  if (!Array.isArray(candidates) || candidates.length === 0) return fallback;
+  if (!Array.isArray(candidates) || candidates.length === 0) return formatTweetForX(fallback);
   const normalized = candidates
     .map(candidate => ({
-      text: memoryValueToText(candidate?.text || candidate),
+      text: formatTweetForX(candidate?.text || candidate),
       scores: scoreObject(candidate?.scores || {}),
       rationale: memoryValueToText(candidate?.rationale)
     }))
     .filter(candidate => candidate.text);
 
   normalized.sort((a, b) => totalViralScore(b.scores) - totalViralScore(a.scores));
-  return normalized[0]?.text || fallback;
+  return normalized[0]?.text || formatTweetForX(fallback);
 }
 
 function normalizeGeneratedTweets(parsed) {
@@ -114,7 +314,7 @@ function normalizeGeneratedTweets(parsed) {
     .map(item => {
       if (typeof item === 'string') {
         return {
-          text: item.trim(),
+          text: formatTweetForX(item),
           type: 'unknown',
           scores: scoreObject({}),
           score: totalViralScore({})
@@ -123,7 +323,7 @@ function normalizeGeneratedTweets(parsed) {
 
       const scores = scoreObject(item?.scores || {});
       return {
-        text: memoryValueToText(item?.text).trim(),
+        text: formatTweetForX(item?.text),
         type: memoryValueToText(item?.type || item?.contentType || 'unknown'),
         scores,
         score: totalViralScore(scores)
@@ -214,7 +414,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     maybeStartAgentAfterSetup(sendResponse);
     return true;
   } else if (request.action === "testPostNow") {
-    const text = (request.text || '').trim();
+    const text = formatTweetForX(request.text || '');
     if (!text) {
       sendResponse({ success: false, error: '测试发帖内容为空' });
       return false;
@@ -623,10 +823,16 @@ function executeNextPost() {
     }
 
     const nextTweet = queue[0];
+    const postText = formatTweetForX(nextTweet.text);
+    if (!postText) {
+      addLog('warn', '队列首条推文为空，已移除并重新调度');
+      chrome.storage.local.set({ tweetQueue: queue.slice(1) }, () => checkAndSetupAlarm());
+      return;
+    }
     addLog('info', `执行发推，当前队列 ${queue.length} 条，发送成功后剩余 ${Math.max(queue.length - 1, 0)} 条`);
     
     chrome.storage.local.set({ 
-      pendingPost: nextTweet.text,
+      pendingPost: postText,
       pendingPostId: nextTweet.id || null,
       pendingPostSource: 'queue'
     }, () => {
@@ -699,14 +905,21 @@ function handlePostCompleted(source) {
 
 async function generateAIResponse(tweetContent) {
   return new Promise((resolve, reject) => {
-    chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'promptTemplate', 'leadTarget', 'aiPersona', 'agentMemory'], async (config) => {
+    chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'promptTemplate', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'accountBio'], async (config) => {
       const errors = getConfigErrors(config);
       if (errors.length > 0) {
         addLog('warn', `配置不完整，无法生成回复：${errors.join('、')}`);
         return reject(new Error(errors.join('；')));
       }
       
-      const personaContext = `\n【你的账号人设与特征】：${config.aiPersona?.characteristics || '未填写'}\n【你的核心引流目标】：${config.aiPersona?.goals || config.leadTarget}\n【你的长期记忆】\n${formatAgentMemory(config.agentMemory)}\n请严格符合上述人设、观点边界和互动策略进行回复。\n`;
+      const playbook = selectGrowthPlaybook({
+        onboardingStrategy: config.onboardingStrategy,
+        persona: config.aiPersona,
+        agentMemory: config.agentMemory,
+        accountBio: config.accountBio,
+        leadTarget: config.leadTarget
+      });
+      const personaContext = `\n【你的账号人设与特征】：${config.aiPersona?.characteristics || '未填写'}\n【你的核心引流目标】：${config.aiPersona?.goals || config.leadTarget}\n【你的长期记忆】\n${formatAgentMemory(config.agentMemory)}\n${formatGrowthPlaybook(playbook)}\n请严格符合上述人设、观点边界、内容模板和互动策略进行回复。\n`;
       
       const prompt = config.promptTemplate
         .replace('{tweet}', tweetContent)
@@ -810,6 +1023,7 @@ async function analyzeOnboardingSource(sourceInput) {
         return;
       }
 
+      const playbookCatalog = formatAllGrowthPlaybooks();
       const prompt = `你是一个真正懂 X/Twitter 推荐机制和中文/英文科技圈传播的账号增长操盘手，不是普通市场顾问。
 你的工作方式：
 - 先判断账号能靠什么被转发、被评论、被收藏、被关注。
@@ -823,12 +1037,16 @@ ${source}
 
 目标用户是：想在 X 上建立影响力的创始人、独立开发者、出海从业者、AI 工具人、投资/研究人员；以及有想法但输出不稳定、会刷 X 但不会把输入转化为观点和内容、强烈想做 KOL 的人。
 
+可选策略模板如下。你必须根据输入选择最匹配的 strategyArchetype，并把对应方法论写进后续策略，不要所有账号都用同一个口吻：
+${playbookCatalog}
+
 请遵守：
 - 如果无法真实访问链接，不要编造具体数据、融资、客户、收益、产品功能。
 - 可以基于 URL、handle、行业关键词进行保守推断。
 - 输出要用于前端多选卡片确认，同时必须体现“流量操盘手”的判断。
 - 不做收益承诺，不建议擦边、政治动员或刷屏。
 - 不要写公众号腔、品牌公关腔、咨询报告腔。要像 X 原生表达：短、具体、有判断、有传播点。
+- 生成推文时必须考虑移动端阅读：Hook 单独一行，长句每 28-36 个中文字符主动换行，逻辑块之间可以留空行。
 
 你必须内部完成以下判断：
 1. 这个账号最可能的增长飞轮是什么：观点传播、实操收藏、故事共鸣、评论截流、产品转化中的哪几个。
@@ -847,6 +1065,7 @@ ${source}
 只能返回 JSON 对象，格式如下：
 {
   "sourceInput": "${source.replace(/"/g, '\\"')}",
+  "strategyArchetype": "ai_product_kol|monetization_global|indie_builder|research_growth|brand_official",
   "accountUse": "brand|evangelist|curator|kol",
   "audience": ["founders", "indie"],
   "audienceCustom": "",
@@ -861,7 +1080,7 @@ ${source}
   "firstTweetText": "从 firstTweetCandidates 中选择总分最高的一条",
   "firstTweetCandidates": [
     {
-      "text": "候选首帖 1",
+      "text": "候选首帖 1，必须包含移动端友好的手动换行",
       "style": "concise|story|contrarian",
       "scores": {
         "hook": 8,
@@ -924,9 +1143,16 @@ function normalizeOnboardingAnalysis(parsed = {}, sourceInput = '') {
     const list = Array.isArray(values) ? values.filter(value => allowed.includes(value)) : [];
     return list.length > 0 ? list : fallback;
   };
+  const fallbackPlaybook = selectGrowthPlaybook({
+    onboardingStrategy: parsed,
+    persona: parsed.persona,
+    agentMemory: parsed.memory || parsed.agentMemory,
+    sourceInput
+  });
 
   return {
     sourceInput: parsed.sourceInput || sourceInput,
+    strategyArchetype: pick(parsed.strategyArchetype, Object.keys(GROWTH_PLAYBOOKS), fallbackPlaybook.id),
     accountUse: pick(parsed.accountUse, ['brand', 'evangelist', 'curator', 'kol'], 'evangelist'),
     audience: pickList(parsed.audience, ['founders', 'indie', 'global', 'aiBuilders', 'researchers'], ['founders', 'indie']),
     audienceCustom: memoryValueToText(parsed.audienceCustom),
@@ -952,7 +1178,7 @@ function normalizeOnboardingAnalysis(parsed = {}, sourceInput = '') {
 }
 
 async function analyzeCompetitors(persona, agentMemoryOverride) {
-  chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget', 'agentMemory'], async (config) => {
+  chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget', 'agentMemory', 'onboardingStrategy', 'accountBio'], async (config) => {
     const errors = getAIConnectionErrors(config);
     if (errors.length > 0) {
       addLog('warn', `配置不完整，无法分析竞品：${errors.join('、')}`);
@@ -960,6 +1186,13 @@ async function analyzeCompetitors(persona, agentMemoryOverride) {
       return;
     }
     addLog('info', '开始竞品对标与爆款策略分析...');
+    const playbook = selectGrowthPlaybook({
+      onboardingStrategy: config.onboardingStrategy,
+      persona,
+      agentMemory: agentMemoryOverride || config.agentMemory,
+      accountBio: config.accountBio,
+      leadTarget: config.leadTarget
+    });
     
     const prompt = `你是 X 增长操盘手，正在为一个低粉账号设计“可执行的爆款拆解与截流计划”。
 
@@ -969,6 +1202,8 @@ async function analyzeCompetitors(persona, agentMemoryOverride) {
 - 核心目标：${persona.goals}
 - 长期记忆：
 ${formatAgentMemory(agentMemoryOverride || config.agentMemory)}
+
+${formatGrowthPlaybook(playbook)}
 
 报告必须像操盘文档，不要像市场报告。必须包含：
 1. 【流量假设】：这个账号靠什么被转发、收藏、评论、关注，各写 1 条。
@@ -1001,7 +1236,7 @@ ${formatAgentMemory(agentMemoryOverride || config.agentMemory)}
 }
 
 async function generateAutoDrafts() {
-  chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget', 'isRunning', 'tweetQueue', 'isGenerating', 'aiPersona', 'agentMemory', 'accountBio', 'competitorReport'], async (config) => {
+  chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget', 'isRunning', 'tweetQueue', 'isGenerating', 'aiPersona', 'agentMemory', 'accountBio', 'competitorReport', 'onboardingStrategy'], async (config) => {
     const errors = getConfigErrors(config);
     const isPersonaEmpty = !config.aiPersona || (!config.aiPersona.targetUsers && !config.aiPersona.characteristics && !config.aiPersona.goals);
     if (!config.isRunning || errors.length > 0 || config.isGenerating || isPersonaEmpty) {
@@ -1019,6 +1254,14 @@ async function generateAutoDrafts() {
     
     const persona = config.aiPersona;
     const memoryContext = formatAgentMemory(config.agentMemory);
+    const playbook = selectGrowthPlaybook({
+      onboardingStrategy: config.onboardingStrategy,
+      persona,
+      agentMemory: config.agentMemory,
+      accountBio: config.accountBio,
+      leadTarget: config.leadTarget
+    });
+    const playbookContext = formatGrowthPlaybook(playbook);
     const reportContext = config.competitorReport ? `\n可用的流量操盘报告如下，必须严格吸收其中的钩子、矩阵和风险边界：\n${config.competitorReport}\n` : "";
     
     const prompt = `你是这个账号的 X 内容操盘手，目标不是“写得完整”，而是写出更像 X 原生内容、能被停留/转发/评论/关注的候选推文。
@@ -1033,6 +1276,7 @@ ${config.accountBio || '暂无'}
 
 长期记忆，必须优先遵守：
 ${memoryContext}
+${playbookContext}
 ${reportContext}
 
 请生成 24 条候选推文，然后只返回你自评后最强的 20 条。必须覆盖以下内容类型：
@@ -1046,7 +1290,8 @@ ${reportContext}
 - 开头第一行必须有 Hook，不要铺垫。
 - 一条推文只讲一个判断。
 - 少形容词，多具体场景、数字、对比、动作。
-- 可以适度换行，但不要写成公众号段落。
+- 必须主动换行，适合手机阅读：Hook 单独一行；长句每 28-36 个中文字符切分；清单每项单独一行；逻辑块之间用一个空行。
+- 不要把 3 个以上的判断塞进同一段，也不要写成公众号长段落。
 - 不要承诺收益，不要编造客户/融资/数据，不要使用擦边或政治动员。
 
 给每条内容按 1-10 分自评：
