@@ -152,6 +152,10 @@ const LOG_SOURCE_LABELS = {
   background: '后台服务'
 };
 
+function hasChromeStorage() {
+  return Boolean(globalThis.chrome?.storage?.local);
+}
+
 const TIMEZONE_SCHEDULES = {
   'Asia/Shanghai': '9-11,12-14,20-23',
   'America/Los_Angeles': '7-9,12-14,18-22',
@@ -208,7 +212,9 @@ function initOptions() {
   bind('targetTimezone', 'change', updatePlanPreview);
   bind('growthGoal', 'input', updatePlanPreview);
   bind('refreshLogsBtn', 'click', loadInlineLogs);
+  bind('agentChatForm', 'submit', sendAgentChat);
   initChoiceCards();
+  initChatPromptChips();
   initAutoSave();
   loadInlineLogs();
   restoreOptions();
@@ -251,6 +257,18 @@ function initAutoSave() {
     if (event.target.matches('select, input, textarea')) {
       scheduleAutoSave();
     }
+  });
+}
+
+function initChatPromptChips() {
+  document.querySelectorAll('.prompt-chip[data-chat-prompt]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const input = document.getElementById('agentChatInput');
+      if (!input) return;
+      const prefix = button.dataset.chatPrompt || '';
+      input.value = input.value.trim() ? `${prefix}\n${input.value.trim()}` : prefix;
+      input.focus();
+    });
   });
 }
 
@@ -477,6 +495,12 @@ function saveOptions(options = {}, afterSave) {
     showStatus(`保存成功，但缺少关键配置：${missing.join('、')}。`, '#f5a623', 5000);
   } else if (!silent) {
     showStatus('Agent 记忆与计划已保存。');
+  }
+
+  if (!hasChromeStorage()) {
+    if (!silent) showStatus('当前是静态预览环境，正式保存请在 Chrome 扩展中完成。', '#f5a623', 5000);
+    if (typeof afterSave === 'function') afterSave();
+    return;
   }
 
   chrome.storage.local.get(['aiPersona'], (result) => {
@@ -985,6 +1009,73 @@ function testPostNow() {
   });
 }
 
+function renderAgentChat(messages = []) {
+  const thread = document.getElementById('agentChatThread');
+  if (!thread) return;
+
+  const visibleMessages = messages.length > 0 ? messages : [{
+    role: 'assistant',
+    content: '把你看到的好帖、账号想法、受众变化或复盘结论发给我。我会帮你判断它适合变成观点、故事、评论策略，还是写进长期记忆。',
+    time: Date.now()
+  }];
+
+  const nodes = visibleMessages.slice(-60).map((message) => {
+    const item = document.createElement('div');
+    item.className = `chat-message ${message.role === 'user' ? 'user' : 'assistant'}`;
+
+    const label = document.createElement('span');
+    label.textContent = message.role === 'user' ? 'You' : 'Agent';
+
+    const text = document.createElement('p');
+    text.textContent = message.content || '';
+
+    item.append(label, text);
+    return item;
+  });
+  thread.replaceChildren(...nodes);
+  thread.scrollTop = thread.scrollHeight;
+}
+
+function setAgentChatBusy(isBusy, message = '') {
+  const input = document.getElementById('agentChatInput');
+  const button = document.getElementById('agentChatSendBtn');
+  const status = document.getElementById('agentChatStatus');
+  if (input) input.disabled = isBusy;
+  if (button) {
+    button.disabled = isBusy;
+    button.textContent = isBusy ? '思考中...' : '发送给 Agent';
+  }
+  if (status) status.textContent = message || (isBusy ? 'Agent 正在提炼记忆...' : '会自动保存到本地记忆');
+}
+
+function sendAgentChat(event) {
+  event?.preventDefault();
+  const input = document.getElementById('agentChatInput');
+  const text = input?.value.trim();
+  if (!text) {
+    showStatus('先写一点想法或粘贴一条好帖。', '#f5a623', 3000);
+    return;
+  }
+  if (!globalThis.chrome?.runtime?.sendMessage) {
+    showStatus('请在 Chrome 扩展环境中使用 Agent 对话。', '#f5a623', 3000);
+    return;
+  }
+
+  setAgentChatBusy(true);
+  chrome.runtime.sendMessage({ action: 'agentChat', message: text }, (response) => {
+    setAgentChatBusy(false);
+    if (chrome.runtime.lastError || !response?.success) {
+      showStatus(`Agent 对话失败：${chrome.runtime.lastError?.message || response?.error || '未知错误'}`, '#ff4d4f', 6000);
+      return;
+    }
+
+    input.value = '';
+    renderAgentChat(response.messages || []);
+    if (response.agentMemory) fillAgentMemory(response.agentMemory, true);
+    showStatus(response.memoryUpdated ? 'Agent 已回复，并写入长期记忆。' : 'Agent 已回复。', '#17bf63', 4000);
+  });
+}
+
 function formatInlineLogTime(ts) {
   const d = new Date(ts);
   const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -1051,6 +1142,14 @@ function renderInlineLogs(logs = []) {
 }
 
 function restoreOptions() {
+  if (!hasChromeStorage()) {
+    renderAgentChat([]);
+    toggleModelInput();
+    toggleScheduleMode();
+    optionsRestored = true;
+    return;
+  }
+
   chrome.storage.local.get({
     apiKey: '',
     apiProvider: 'gemini',
@@ -1065,6 +1164,7 @@ function restoreOptions() {
     aiPersona: { targetUsers: '', characteristics: '', goals: '' },
     agentMemory: DEFAULT_AGENT_MEMORY,
     onboardingStrategy: DEFAULT_ONBOARDING_STRATEGY,
+    agentChatMessages: [],
     competitorReport: '',
     testPostText: DEFAULT_TEST_POST,
     accountBio: '',
@@ -1091,6 +1191,7 @@ function restoreOptions() {
     fillAgentMemory(items.agentMemory);
     document.getElementById('competitorReport').value = items.competitorReport || '';
     document.getElementById('testPostText').value = items.testPostText || DEFAULT_TEST_POST;
+    renderAgentChat(items.agentChatMessages || []);
     applyOnboardingStrategy(items.onboardingStrategy || DEFAULT_ONBOARDING_STRATEGY);
     toggleModelInput();
     toggleScheduleMode();
@@ -1099,31 +1200,36 @@ function restoreOptions() {
   });
 }
 
-chrome.storage.onChanged.addListener((changes, namespace) => {
-  if (namespace !== 'local') return;
+if (globalThis.chrome?.storage?.onChanged) {
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace !== 'local') return;
 
-  if (changes.aiPersona?.newValue) {
-    const persona = changes.aiPersona.newValue || {};
-    setValueIfNotFocused('aiTargetUsers', persona.targetUsers || '');
-    setValueIfNotFocused('aiCharacteristics', persona.characteristics || '');
-    setValueIfNotFocused('aiGoals', persona.goals || '');
-  }
-  if (changes.competitorReport) {
-    setValueIfNotFocused('competitorReport', changes.competitorReport.newValue || '');
-  }
-  if (changes.agentMemory) {
-    fillAgentMemory(changes.agentMemory.newValue || {}, true);
-  }
-  if (changes.logs) {
-    renderInlineLogs(changes.logs.newValue || []);
-  }
+    if (changes.aiPersona?.newValue) {
+      const persona = changes.aiPersona.newValue || {};
+      setValueIfNotFocused('aiTargetUsers', persona.targetUsers || '');
+      setValueIfNotFocused('aiCharacteristics', persona.characteristics || '');
+      setValueIfNotFocused('aiGoals', persona.goals || '');
+    }
+    if (changes.competitorReport) {
+      setValueIfNotFocused('competitorReport', changes.competitorReport.newValue || '');
+    }
+    if (changes.agentMemory) {
+      fillAgentMemory(changes.agentMemory.newValue || {}, true);
+    }
+    if (changes.agentChatMessages) {
+      renderAgentChat(changes.agentChatMessages.newValue || []);
+    }
+    if (changes.logs) {
+      renderInlineLogs(changes.logs.newValue || []);
+    }
 
-  chrome.storage.local.get([
-    'profileReadProgress',
-    'isAnalyzingPersona',
-    'isAnalyzingCompetitors',
-    'isGenerating',
-    'isRunning',
-    'competitorReport'
-  ], updateSetupStatusFromStorage);
-});
+    chrome.storage.local.get([
+      'profileReadProgress',
+      'isAnalyzingPersona',
+      'isAnalyzingCompetitors',
+      'isGenerating',
+      'isRunning',
+      'competitorReport'
+    ], updateSetupStatusFromStorage);
+  });
+}

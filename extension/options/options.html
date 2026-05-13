@@ -18,7 +18,7 @@
       </div>
       <nav class="primary-nav">
         <span class="nav-label">Workspace</span>
-        <a href="#onboarding" class="is-current">工作台</a>
+        <a href="#agent-chat" class="is-current">工作台</a>
         <a href="#blueprint">任务</a>
         <a href="#runtime">模型</a>
         <a href="#strategy-wizard">渠道</a>
@@ -31,12 +31,55 @@
     <main class="workspace">
       <header class="page-header">
         <div>
-          <p class="eyebrow">Agent Builder</p>
-          <h1>从一个链接开始，生成你的 X 发声 Agent</h1>
-          <p>新用户不需要先写复杂定位。输入产品网站、X 主页、竞品网站或想模仿的账号，然后通过多选卡片确认方向，Agent 会把选择沉淀成长期记忆、内容计划和第一条推文。</p>
+          <p class="eyebrow">Agent Console</p>
+          <h1>和你的 X 发声 Agent 一起调内容</h1>
+          <p>把看到的好帖子、突然冒出的想法、复盘结论或新的偏好丢给 Agent。它不是通用聊天，而是专门把输入沉淀成 X 账号长期记忆、内容方向和下一步发声动作。</p>
         </div>
         <button id="saveBtn" class="btn-primary">保存 Agent</button>
       </header>
+
+      <section class="panel chat-panel" id="agent-chat">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Agent Chat</p>
+            <h2>专用 X 发声对话台</h2>
+            <p class="panel-intro">这里不是通用大模型对话。每次交流都会尽量转化为：账号偏好、内容素材、表达规则、评论引流策略或可发布草稿。</p>
+          </div>
+          <span class="panel-tag">Memory Writer</span>
+        </div>
+
+        <div class="chat-layout">
+          <div class="chat-main">
+            <div id="agentChatThread" class="chat-thread" aria-live="polite">
+              <div class="chat-message assistant">
+                <span>Agent</span>
+                <p>把你看到的好帖、账号想法、受众变化或复盘结论发给我。我会帮你判断它适合变成观点、故事、评论策略，还是写进长期记忆。</p>
+              </div>
+            </div>
+
+            <form id="agentChatForm" class="chat-composer">
+              <textarea id="agentChatInput" rows="4" placeholder="粘贴一条好帖、写下一个想法，或告诉 Agent：我以后想多写什么、少写什么、评论应该导向哪里。"></textarea>
+              <div class="chat-actions">
+                <span id="agentChatStatus" class="chat-status">会自动保存到本地记忆</span>
+                <button id="agentChatSendBtn" class="btn-primary" type="submit">发送给 Agent</button>
+              </div>
+            </form>
+          </div>
+
+          <aside class="chat-guide">
+            <p class="eyebrow">Use It For</p>
+            <h3>适合投喂什么</h3>
+            <button class="prompt-chip" type="button" data-chat-prompt="我看到一条好帖，想让你拆解它为什么容易传播，并提炼成我的账号可以学习的表达规则：">拆解好帖</button>
+            <button class="prompt-chip" type="button" data-chat-prompt="这是我今天的新想法，请判断它适合写成观点帖、故事帖、干货帖还是评论，并给我一个 X 原生表达版本：">整理想法</button>
+            <button class="prompt-chip" type="button" data-chat-prompt="我想更新账号偏好：以后多写 / 少写 / 不写这些内容，请写入长期记忆：">更新偏好</button>
+            <button class="prompt-chip" type="button" data-chat-prompt="这是一次内容复盘，请帮我判断哪些信号应该写入记忆，哪些方向下周继续测试：">复盘信号</button>
+            <div class="chat-boundary">
+              <strong>边界</strong>
+              <p>只处理 X 发声、涨粉、内容策略、评论互动、长期记忆，不做闲聊型万能助手。</p>
+            </div>
+          </aside>
+        </div>
+      </section>
 
       <section class="panel setup-panel" id="onboarding">
         <div class="panel-head">

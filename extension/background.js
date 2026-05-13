@@ -380,6 +380,7 @@ chrome.runtime.onInstalled.addListener((details) => {
         promptTemplate: '你是一个社交媒体引流专家。请根据推文内容，给出一段简短、神回复级别的评论（不超过 40 个字）。\n如果合适的话，请巧妙、自然地顺带提及我的【引流信息】，千万不要显得像生硬的广告，要像朋友间的随口分享：\n\n【推文】：{tweet}\n【引流信息】：{leadTarget}\n\n回复：',
         leadTarget: '',
         agentMemory: DEFAULT_AGENT_MEMORY,
+        agentChatMessages: [],
         postInterval: 30,
         replyInterval: 30
       });
@@ -423,6 +424,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .then((analysis) => sendResponse({ success: true, analysis }))
       .catch((error) => {
         addLog('warn', `启动向导分析失败: ${error.message}`);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
+  } else if (request.action === "agentChat") {
+    handleAgentChat(request.message || '')
+      .then((result) => sendResponse({ success: true, ...result }))
+      .catch((error) => {
+        addLog('error', `Agent 对话失败: ${error.message}`);
         sendResponse({ success: false, error: error.message });
       });
     return true;
@@ -948,6 +957,166 @@ async function generateAIResponse(tweetContent) {
       } catch (e) {
         console.warn("X Auto Bot: API Rate limit or fetch error", e);
         reject(e);
+      }
+    });
+  });
+}
+
+function appendMemoryNote(memory = {}, key, note, maxLength = 2400) {
+  const normalized = normalizeAgentMemory(memory);
+  const cleanNote = memoryValueToText(note).trim();
+  if (!cleanNote) return normalized;
+  const current = memoryValueToText(normalized[key]).trim();
+  if (current.includes(cleanNote)) return normalized;
+  const next = current ? `${current}\n${cleanNote}` : cleanNote;
+  normalized[key] = next.length > maxLength ? next.slice(next.length - maxLength) : next;
+  return normalized;
+}
+
+function buildLocalChatMemoryPatch(message) {
+  return {
+    sourceInputs: `用户投喂的新素材/想法：${message}`,
+    weeklyReviewSignals: `待复盘信号：用户在 Agent 对话中新增了一个偏好或素材，需要判断是否进入选题池。`
+  };
+}
+
+function mergeChatMemory(baseMemory = {}, patch = {}) {
+  let memory = normalizeAgentMemory(baseMemory);
+  Object.entries(patch || {}).forEach(([key, value]) => {
+    if (DEFAULT_AGENT_MEMORY[key] === undefined) return;
+    memory = appendMemoryNote(memory, key, value);
+  });
+  return memory;
+}
+
+async function handleAgentChat(message) {
+  const userMessage = memoryValueToText(message).trim();
+  if (!userMessage) throw new Error('消息为空');
+
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get([
+      'apiKey',
+      'apiProvider',
+      'aiModel',
+      'leadTarget',
+      'agentMemory',
+      'onboardingStrategy',
+      'aiPersona',
+      'accountBio',
+      'agentChatMessages'
+    ], async (config) => {
+      const messages = Array.isArray(config.agentChatMessages) ? config.agentChatMessages.slice(-60) : [];
+      const userEntry = { role: 'user', content: userMessage, time: Date.now() };
+      const errors = getAIConnectionErrors(config);
+
+      if (errors.length > 0) {
+        const memoryPatch = buildLocalChatMemoryPatch(userMessage);
+        const agentMemory = mergeChatMemory(config.agentMemory, memoryPatch);
+        const assistantEntry = {
+          role: 'assistant',
+          content: `我先把这条输入记录进素材池。\n\n当前还缺少 API Key 或模型配置，所以我不能做深度拆解。配置好模型后，我会把这类输入进一步转成：选题角度、表达规则、评论策略或可发布草稿。`,
+          time: Date.now()
+        };
+        const nextMessages = [...messages, userEntry, assistantEntry].slice(-60);
+        chrome.storage.local.set({ agentChatMessages: nextMessages, agentMemory }, () => {
+          addLog('info', 'Agent 对话已本地记录到长期记忆');
+          resolve({ messages: nextMessages, agentMemory, memoryUpdated: true });
+        });
+        return;
+      }
+
+      const playbook = selectGrowthPlaybook({
+        onboardingStrategy: config.onboardingStrategy,
+        persona: config.aiPersona,
+        agentMemory: config.agentMemory,
+        accountBio: config.accountBio,
+        leadTarget: config.leadTarget
+      });
+
+      const recentContext = messages.slice(-12)
+        .map(item => `${item.role === 'user' ? '用户' : 'Agent'}：${item.content}`)
+        .join('\n');
+
+      const prompt = `你是一个专用的 X 发声 Agent 策略编辑器，不是通用聊天机器人。
+用户会把好帖子、想法、复盘、偏好、产品方向或评论引流资产发给你。
+
+你的任务：
+1. 判断这条输入应该沉淀为：选题角度、核心观点、语气规则、读者痛点、评论策略、风险边界、素材来源或复盘信号。
+2. 用简短但有判断力的方式回复用户，告诉他这条输入可以如何用于 X 发声。
+3. 必须提炼 memoryPatch，写入长期记忆。不要覆盖原记忆，只提供新增内容。
+4. 如适合，给一个 X 原生表达样例，但不要承诺收益，不要编造事实，不要变成公众号腔。
+
+账号画像：
+- 目标用户：${config.aiPersona?.targetUsers || '未填写'}
+- 发文特征：${config.aiPersona?.characteristics || '未填写'}
+- 核心目标：${config.aiPersona?.goals || config.leadTarget || '未填写'}
+${formatLeadAsset(config.onboardingStrategy)}
+
+当前长期记忆：
+${formatAgentMemory(config.agentMemory)}
+
+当前增长模板：
+${formatGrowthPlaybook(playbook)}
+
+最近对话：
+${recentContext || '暂无'}
+
+用户最新输入：
+${userMessage}
+
+只返回 JSON，不要 Markdown 代码块：
+{
+  "reply": "给用户看的回复，必须明确说明这不是泛聊，而是如何更新 X 发声策略",
+  "memoryPatch": {
+    "identity": "",
+    "marketPosition": "",
+    "audienceSegments": "",
+    "audiencePains": "",
+    "contentPillars": "",
+    "contentAngles": "",
+    "proofAssets": "",
+    "personalStories": "",
+    "coreOpinions": "",
+    "boundaries": "",
+    "voiceRules": "",
+    "bannedClaims": "",
+    "interactionTargets": "",
+    "replyStrategy": "",
+    "sourceInputs": "",
+    "weeklyReviewSignals": ""
+  },
+  "suggestedTweet": "如果适合，给一条带换行的候选推文；不适合则为空"
+}`;
+
+      try {
+        const generatedText = await callLLM(prompt, config, true);
+        const cleanJsonStr = generatedText.replace(/```json/g, '').replace(/```/g, '').trim();
+        let parsed;
+        try {
+          parsed = JSON.parse(cleanJsonStr);
+        } catch (parseError) {
+          parsed = {
+            reply: generatedText.trim(),
+            memoryPatch: buildLocalChatMemoryPatch(userMessage),
+            suggestedTweet: ''
+          };
+        }
+
+        const agentMemory = mergeChatMemory(config.agentMemory, parsed.memoryPatch || {});
+        const suggestedTweet = formatTweetForX(parsed.suggestedTweet || '');
+        const replyText = [
+          memoryValueToText(parsed.reply).trim() || '我已把这条输入转成 X Agent 的记忆更新。',
+          suggestedTweet ? `\n可测试推文：\n${suggestedTweet}` : ''
+        ].filter(Boolean).join('\n');
+        const assistantEntry = { role: 'assistant', content: replyText, time: Date.now() };
+        const nextMessages = [...messages, userEntry, assistantEntry].slice(-60);
+
+        chrome.storage.local.set({ agentChatMessages: nextMessages, agentMemory }, () => {
+          addLog('success', 'Agent 对话已更新长期记忆');
+          resolve({ messages: nextMessages, agentMemory, memoryUpdated: true });
+        });
+      } catch (error) {
+        reject(error);
       }
     });
   });
