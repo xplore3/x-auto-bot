@@ -537,6 +537,7 @@ function scrapeTweets() {
     for (const article of articles) {
       const author = getTweetAuthor(article);
       const text = getTweetText(article);
+      const tweetStatusHref = getTweetStatusHref(article);
       
       if (!text || text.length < 10) continue;
       const tweetId = getTweetBotId(article, author, text);
@@ -564,7 +565,8 @@ function scrapeTweets() {
         tweetText: text,
         tweetContent: text,
         tweetAuthor: author,
-        tweetElementId: tweetId
+        tweetElementId: tweetId,
+        tweetStatusHref
       }, (response) => {
         isReplying = false;
         chrome.storage.local.set({ isGeneratingReply: false });
@@ -601,7 +603,7 @@ function scrapeTweets() {
           if (willSend) {
             // Dispatch event for automator
             window.dispatchEvent(new CustomEvent('xAutoBot_ReadyToReply', {
-              detail: { tweetElementId: tweetId, replyText, tweetAuthor: author, tweetContent: text }
+              detail: { tweetElementId: tweetId, replyText, tweetAuthor: author, tweetContent: text, tweetStatusHref }
             }));
           }
         }

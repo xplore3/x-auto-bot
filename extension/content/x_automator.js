@@ -51,6 +51,14 @@ function notifyReplyCompleted(tweetAuthor, tweetContent, replyText) {
   });
 }
 
+function setLocalStorage(values) {
+  return new Promise(resolve => chrome.storage.local.set(values, resolve));
+}
+
+function removeLocalStorage(keys) {
+  return new Promise(resolve => chrome.storage.local.remove(keys, resolve));
+}
+
 function addLog(level, message) {
   if (!chrome.runtime?.id) return;
   const entry = {
@@ -69,6 +77,19 @@ function addLog(level, message) {
 
 function getIntentPostUrl(text) {
   return `https://x.com/intent/post?text=${encodeURIComponent(text || '')}`;
+}
+
+function getIntentReplyUrl(statusId, text) {
+  return `https://x.com/intent/tweet?in_reply_to=${encodeURIComponent(statusId || '')}&text=${encodeURIComponent(text || '')}`;
+}
+
+function getStatusIdFromHref(href = '') {
+  const match = String(href || '').match(/\/status\/(\d+)/);
+  return match?.[1] || '';
+}
+
+function getTweetStatusHrefFromNode(tweetNode) {
+  return tweetNode?.querySelector('a[href*="/status/"]')?.getAttribute('href') || '';
 }
 
 function normalizeText(text) {
@@ -108,7 +129,9 @@ function findActiveDialog() {
 
 function findSendButton(scope) {
   const root = scope || document;
-  return root.querySelector('[data-testid="tweetButton"]') || root.querySelector('[data-testid="tweetButtonInline"]');
+  return root.querySelector('[data-testid="tweetButton"]')
+    || root.querySelector('[data-testid="tweetButtonInline"]')
+    || findButtonByText(root, [/^(post|tweet|reply)$/i, /^(发布|发帖|回复)$/]);
 }
 
 function isVisibleElement(element) {
@@ -238,15 +261,39 @@ function isLoggedOutOrBlocked() {
   );
 }
 
+async function startIntentReplyFallback({ statusId, replyText, tweetAuthor, tweetContent, reason }) {
+  if (!statusId) return false;
+  addLog('warn', `${reason}，切换到 X 官方 intent 回复页重试`);
+  await setLocalStorage({
+    pendingReply: {
+      statusId,
+      replyText,
+      tweetAuthor,
+      tweetContent,
+      createdAt: Date.now()
+    },
+    isTyping: true,
+    isAutoPaused: false,
+    pauseReason: ''
+  });
+  window.location.assign(getIntentReplyUrl(statusId, replyText));
+  setTimeout(() => {
+    isAutomatorBusy = false;
+    handlePendingReply();
+  }, 3500);
+  return true;
+}
+
 window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
   if (isAutomatorBusy) {
     addLog('warn', '上一次回复/发推操作尚未完成，跳过本次回复触发');
     return;
   }
   if (!chrome.runtime?.id) return;
-  const { tweetElementId, replyText, tweetAuthor, tweetContent } = e.detail;
+  const { tweetElementId, replyText, tweetAuthor, tweetContent, tweetStatusHref } = e.detail;
   const author = tweetAuthor || '未知用户';
   const originalText = tweetContent || '';
+  let statusId = getStatusIdFromHref(tweetStatusHref);
   
   chrome.storage.local.get(['isRunning'], async (result) => {
     if (!result.isRunning) return;
@@ -256,10 +303,21 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
     if (!tweetNode) {
       const reason = `未找到 @${author} 的目标推文节点，取消回复`;
       addLog('warn', reason);
+      if (await startIntentReplyFallback({ statusId, replyText, tweetAuthor: author, tweetContent: originalText, reason })) {
+        return;
+      }
       notifyReplyFailed(reason);
       isAutomatorBusy = false;
       return;
     }
+    statusId = statusId || getStatusIdFromHref(getTweetStatusHrefFromNode(tweetNode));
+    const fallbackToIntent = (reason) => startIntentReplyFallback({
+      statusId,
+      replyText,
+      tweetAuthor: author,
+      tweetContent: originalText,
+      reason
+    });
 
     addLog('info', `开始回复 @${author}...`);
     chrome.storage.local.set({ isTyping: true });
@@ -269,6 +327,7 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
       if (!replyBtn) {
         const reason = `未找到 @${author} 推文的回复按钮`;
         addLog('warn', reason);
+        if (await fallbackToIntent(reason)) return;
         notifyReplyFailed(reason);
         return;
       }
@@ -284,6 +343,7 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
       if (!draftEditor) {
         const reason = '未找到回复输入框';
         addLog('warn', reason);
+        if (await fallbackToIntent(reason)) return;
         notifyReplyFailed(reason);
         return;
       }
@@ -293,9 +353,10 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
       await simulateTyping(draftEditor, replyText);
       addLog('info', `已输入回复内容 (${replyText.length} 字)`);
       if (getEditorText(draftEditor) !== normalizeText(replyText)) {
-        consecutiveFailures++;
-        const reason = `回复文本校验失败，取消发送 (连续失败 ${consecutiveFailures} 次)`;
+        const reason = '回复文本校验失败，取消弹窗发送';
         addLog('error', reason);
+        if (await fallbackToIntent(reason)) return;
+        consecutiveFailures++;
         notifyReplyFailed(reason);
         checkAndPause();
         return;
@@ -341,10 +402,11 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
         }
         
         if (!sendBtn) {
-          consecutiveFailures++;
           const currentButton = dialog ? findSendButton(dialog) : findSendButton(document);
-          const reason = `发送按钮未自然启用，取消本次回复。文本长度 ${normalizeText(replyText).length}，输入框文本「${getEditorText(draftEditor).substring(0, 40)}」，按钮状态 ${getButtonDisabledReason(currentButton)} (连续失败 ${consecutiveFailures} 次)`;
+          const reason = `发送按钮未自然启用，取消弹窗回复。文本长度 ${normalizeText(replyText).length}，输入框文本「${getEditorText(draftEditor).substring(0, 40)}」，按钮状态 ${getButtonDisabledReason(currentButton)}`;
           addLog('error', reason);
+          if (await fallbackToIntent(reason)) return;
+          consecutiveFailures++;
           notifyReplyFailed(reason);
           checkAndPause();
           return;
@@ -371,9 +433,10 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
           checkAndPause();
         }
       } else {
-        consecutiveFailures++;
-        const reason = `未找到发送按钮，回复未完成 (连续失败 ${consecutiveFailures} 次)`;
+        const reason = '未找到发送按钮，弹窗回复未完成';
         addLog('error', reason);
+        if (await fallbackToIntent(reason)) return;
+        consecutiveFailures++;
         notifyReplyFailed(reason);
         checkAndPause();
       }
@@ -396,9 +459,9 @@ async function simulateTyping(element, text) {
   const methods = [
     insertByKeyboardEvents,
     insertByExecCommand,
-    insertByPasteEvent,
-    insertByDirectInput
+    insertByPasteEvent
   ];
+  if (!element.isContentEditable) methods.push(insertByDirectInput);
 
   for (const method of methods) {
     try {
@@ -445,9 +508,7 @@ async function prepareEditor(element) {
   } catch (e) {
     // Some pages block execCommand; fallback methods below still run.
   }
-  if (element.isContentEditable && getEditorText(element)) {
-    element.textContent = '';
-  } else if (!element.isContentEditable) {
+  if (!element.isContentEditable) {
     element.value = '';
   }
   element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }));
@@ -509,12 +570,11 @@ async function insertByPasteEvent(element, text) {
 }
 
 async function insertByDirectInput(element, text) {
-  await prepareEditor(element);
   if (element.isContentEditable) {
-    element.textContent = text;
-  } else {
-    element.value = text;
+    throw new Error('跳过 contenteditable 的直接 DOM 写入，避免 X 显示假文本但按钮不可发');
   }
+  await prepareEditor(element);
+  element.value = text;
   element.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, inputType: 'insertText', data: text }));
   element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
   element.dispatchEvent(new Event('change', { bubbles: true }));
@@ -718,6 +778,107 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // Run once on load in case the tab was newly opened by background
 setTimeout(handlePendingPost, 3000);
+setTimeout(handlePendingReply, 3500);
+
+async function handlePendingReply() {
+  if (isAutomatorBusy) {
+    addLog('warn', '上一次回复/发推操作尚未完成，跳过本次 intent 回复触发');
+    return;
+  }
+  if (!chrome.runtime?.id) return;
+
+  chrome.storage.local.get(['pendingReply', 'isRunning'], async (result) => {
+    const pending = result.pendingReply;
+    if (!pending?.replyText || !pending?.statusId) return;
+    if (!result.isRunning) {
+      addLog('info', '机器人已停止，跳过 intent 回复');
+      return;
+    }
+
+    isAutomatorBusy = true;
+    const expectedText = normalizeText(pending.replyText);
+    chrome.storage.local.set({ isTyping: true });
+
+    try {
+      if (isLoggedOutOrBlocked()) {
+        pauseAutomation('X 页面可能未登录、报错或出现验证，已暂停回复');
+        return;
+      }
+
+      const isReplyIntentPage = /\/intent\/(tweet|post)/.test(window.location.pathname)
+        && (window.location.search.includes('in_reply_to') || window.location.search.includes(pending.statusId));
+      if (!isReplyIntentPage) {
+        addLog('info', '打开 X 官方 intent 回复页');
+        window.location.assign(getIntentReplyUrl(pending.statusId, pending.replyText));
+        return;
+      }
+
+      const draftEditor = await waitForElement(findTweetEditor, 10000);
+      if (!draftEditor) {
+        pauseAutomation('未找到 X intent 回复编辑器，已暂停');
+        return;
+      }
+
+      let actualText = getEditorText(draftEditor);
+      if (actualText !== expectedText) {
+        addLog('warn', `intent 回复预填文本暂未匹配，等待 X 渲染。当前: ${actualText.substring(0, 40)}...`);
+        await sleep(1200);
+        actualText = getEditorText(draftEditor);
+      }
+
+      if (actualText !== expectedText) {
+        addLog('warn', 'X intent 未完成预填，尝试一次真实编辑器输入');
+        await simulateTyping(draftEditor, pending.replyText);
+        await sleep(1200);
+        actualText = getEditorText(draftEditor);
+      }
+
+      if (actualText !== expectedText) {
+        pauseAutomation(`X intent 回复文本校验失败，已暂停。期望「${expectedText.substring(0, 40)}...」，实际「${actualText.substring(0, 40)}...」`);
+        return;
+      }
+
+      let sendBtn = await waitForEnabledButton(() => {
+        const dialog = findActiveDialog();
+        return dialog ? findSendButton(dialog) : findSendButton(document);
+      }, 12000);
+
+      if (!sendBtn) {
+        const dialog = findActiveDialog();
+        const currentButton = dialog ? findSendButton(dialog) : findSendButton(document);
+        pauseAutomation(`X intent 回复按钮未启用，已暂停。按钮状态 ${getButtonDisabledReason(currentButton)}`);
+        return;
+      }
+
+      simulateRealClick(sendBtn);
+      addLog('info', '已点击 X intent 回复按钮');
+      await waitForElement(() => {
+        const editorStillOpen = document.querySelector('div[role="dialog"]') || findTweetEditor();
+        return editorStillOpen ? null : document.body;
+      }, 12000, 500);
+
+      const editorStillOpen = document.querySelector('div[role="dialog"]') || findTweetEditor();
+      if (editorStillOpen) {
+        pauseAutomation(`X intent 回复后编辑器仍在，可能未发送成功，已暂停。按钮状态 ${getButtonDisabledReason(findSendButton(findActiveDialog() || document))}`);
+        return;
+      }
+
+      consecutiveFailures = 0;
+      await removeLocalStorage(['pendingReply']);
+      addLog('success', `已通过 X 官方 intent 回复 @${pending.tweetAuthor || '未知用户'}`);
+      notifyReplyCompleted(pending.tweetAuthor || '未知用户', pending.tweetContent || '', pending.replyText);
+    } catch (error) {
+      consecutiveFailures++;
+      const reason = `X intent 自动回复异常: ${error.message} (连续失败 ${consecutiveFailures} 次)`;
+      addLog('error', reason);
+      notifyReplyFailed(reason);
+      checkAndPause();
+    } finally {
+      chrome.storage.local.set({ isTyping: false });
+      isAutomatorBusy = false;
+    }
+  });
+}
 
 async function handlePendingPost() {
   if (isAutomatorBusy) {

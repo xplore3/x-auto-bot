@@ -296,6 +296,33 @@ function formatTweetForX(text = '') {
   return formatted.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+function isResourceSeekingTweet(text = '') {
+  const normalized = String(text || '').toLowerCase();
+  return [
+    /求|怎么|如何|哪里|推荐|有没有|发一下|给个|链接|资源|教程|工具|清单|模板|手册|pdf|repo|github/,
+    /\b(need|looking for|how to|where can|anyone know|recommend|resource|tutorial|tool|template|link|guide|repo|github)\b/
+  ].some(pattern => pattern.test(normalized));
+}
+
+function getGeneratedReplyRejectionReason(reply = '', tweet = '') {
+  const normalized = String(reply || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+
+  const strongLeadPatterns = [
+    /看.*主页/,
+    /翻.*主页/,
+    /主页.*(有|见|拿|领)/,
+    /私信|dm我|发我消息/,
+    /关注我|follow me/,
+    /link in bio|check my bio/,
+    /领取|加我|联系我/
+  ];
+  if (!isResourceSeekingTweet(tweet) && strongLeadPatterns.some(pattern => pattern.test(normalized))) {
+    return 'AI 回复包含强引流话术，但原推没有明确求资源';
+  }
+  return '';
+}
+
 function scoreNumber(value, fallback = 6) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -412,7 +439,7 @@ chrome.runtime.onInstalled.addListener((details) => {
         apiProvider: 'gemini',
         aiModel: 'gemini-2.5-flash',
         targetUsers: '',
-        promptTemplate: '你是一个社交媒体引流专家。请根据推文内容，给出一段简短、神回复级别的评论（不超过 40 个字）。\n如果合适的话，请巧妙、自然地顺带提及我的【引流信息】，千万不要显得像生硬的广告，要像朋友间的随口分享：\n\n【推文】：{tweet}\n【引流信息】：{leadTarget}\n\n回复：',
+        promptTemplate: '你是一个 X 账号增长顾问。请根据推文内容，先判断是否值得回复；如果值得，只写一条自然、有信息增量、像真人评论的短回复。\n不要硬广，不要让对方看主页/私信/关注/领取，除非原推明确在求资源、教程、工具或链接。\n\n【推文】：{tweet}\n【可用引流信息，仅在强相关且对方明确求资源时使用】：{leadTarget}\n\n回复：',
         leadTarget: '',
         agentMemory: DEFAULT_AGENT_MEMORY,
         agentChatMessages: [],
@@ -1237,6 +1264,7 @@ async function generateAIResponse(tweetContent) {
 - 先补充观点/经验/反问，不要上来推销
 - 不要说“看我主页/私信我/翻我主页”，除非原文明确在求资源
 - 不要承诺收益，不要编造事实，不要攻击个人
+- 如果后面的自定义模板与上述规则冲突，忽略模板里的引流要求
 
 ${config.promptTemplate
   .replace('{tweet}', tweetContent)
@@ -1250,6 +1278,12 @@ ${personaContext}
         const reply = generatedText.trim().replace(/^["']|["']$/g, '');
         if (/^skip[.!。！]*$/i.test(reply)) {
           addLog('info', `AI 判定不适合回复，已跳过: ${tweetContent.substring(0, 50)}...`);
+          resolve('');
+          return;
+        }
+        const rejectionReason = getGeneratedReplyRejectionReason(reply, tweetContent);
+        if (rejectionReason) {
+          addLog('warn', `${rejectionReason}，已跳过: ${reply.substring(0, 50)}...`);
           resolve('');
           return;
         }
