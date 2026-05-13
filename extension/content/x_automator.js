@@ -149,6 +149,12 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
       // 3. Simulate typing
       await simulateTyping(draftEditor, replyText);
       addLog('info', `已输入回复内容 (${replyText.length} 字)`);
+      if (getEditorText(draftEditor) !== normalizeText(replyText)) {
+        consecutiveFailures++;
+        addLog('error', `回复文本校验失败，取消发送 (连续失败 ${consecutiveFailures} 次)`);
+        checkAndPause();
+        return;
+      }
 
       // 4. Find send button INSIDE the dialog (not globally)
       const dialog = draftEditor.closest('div[role="dialog"]') || document.querySelector('div[role="dialog"]');
@@ -233,22 +239,32 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
 async function simulateTyping(element, text) {
   element.focus();
   element.click();
+  const normalized = normalizeText(text);
   
-  // 最可靠的方式：直接设置内容再触发事件
-  // X.com 使用 contenteditable div
   if (element.isContentEditable) {
-    element.textContent = text;
+    element.textContent = '';
+    document.execCommand('insertText', false, normalized);
   } else {
-    element.value = text;
+    element.value = normalized;
   }
   
   // 触发完整的事件序列让 React 识别到内容变化
   element.dispatchEvent(new Event('focus', { bubbles: true }));
-  element.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, inputType: 'insertText', data: text }));
-  element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+  element.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, inputType: 'insertText', data: normalized }));
+  element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: normalized }));
   element.dispatchEvent(new Event('change', { bubbles: true }));
   element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'a' }));
   element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
+
+  if (getEditorText(element) !== normalized) {
+    if (element.isContentEditable) {
+      element.textContent = normalized;
+    } else {
+      element.value = normalized;
+    }
+    element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: normalized }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  }
   
   await sleep(2000); // 给 React 足够时间更新状态和启用按钮
 }

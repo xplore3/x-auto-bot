@@ -1,6 +1,9 @@
 // background.js
 
 const MAX_LOGS = 50;
+const DRAFT_TARGET_COUNT = 20;
+const DRAFT_REFILL_THRESHOLD = 5;
+
 const DEFAULT_AGENT_MEMORY = {
   identity: '',
   marketPosition: '',
@@ -513,6 +516,14 @@ function hasPersona(persona) {
   return Boolean(persona && (persona.targetUsers || persona.characteristics || persona.goals));
 }
 
+function getAutomationMode(config = {}) {
+  return config.onboardingStrategy?.automationMode || 'review';
+}
+
+function canAutoPublish(config = {}) {
+  return getAutomationMode(config) === 'auto';
+}
+
 function handleXLoginDetected() {
   chrome.storage.local.get(['xLoginSettingsOpened', 'apiKey', 'leadTarget', 'aiPersona', 'competitorReport'], (res) => {
     const ready = Boolean(res.apiKey && res.leadTarget && hasPersona(res.aiPersona) && res.competitorReport);
@@ -584,6 +595,10 @@ function maybeStartAgentAfterSetup(sendResponse) {
       isRunning: true,
       isAutoPaused: false,
       pauseReason: '',
+      twitterCooldownUntil: 0,
+      apiCooldownUntil: 0,
+      isGeneratingReply: false,
+      isTyping: false,
       setupAutoStartRequested: false,
       configErrors: []
     }, () => {
@@ -675,10 +690,15 @@ async function callLLM(prompt, config, requireJson = false) {
 }
 
 function checkAndSetupAlarm() {
-  chrome.storage.local.get(['tweetQueue', 'isRunning'], (result) => {
+  chrome.storage.local.get(['tweetQueue', 'isRunning', 'onboardingStrategy'], (result) => {
     if (!result.isRunning) {
        chrome.alarms.clear("postTweetAlarm");
        return;
+    }
+    if (!canAutoPublish(result)) {
+      chrome.alarms.clear("postTweetAlarm");
+      chrome.storage.local.set({ nextPostTime: '先审后发：等待人工确认' });
+      return;
     }
     const queue = result.tweetQueue || [];
     if (queue.length > 0) {
@@ -822,7 +842,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 function executeNextPost() {
-  chrome.storage.local.get(['tweetQueue', 'pendingPost', 'postsToday', 'lastPostDate', 'postsPerDay', 'isAutoPaused'], (result) => {
+  chrome.storage.local.get(['tweetQueue', 'pendingPost', 'postsToday', 'lastPostDate', 'postsPerDay', 'isAutoPaused', 'onboardingStrategy'], (result) => {
+    if (!canAutoPublish(result)) {
+      addLog('info', '当前为先审后发/影子模式，跳过自动发推执行');
+      chrome.alarms.clear("postTweetAlarm");
+      chrome.storage.local.set({ nextPostTime: '先审后发：等待人工确认' });
+      return;
+    }
     if (result.isAutoPaused) {
       addLog('info', '自动操作已暂停，跳过本次发推执行');
       return;
@@ -1436,9 +1462,10 @@ async function generateAutoDrafts() {
       return;
     }
     let queue = config.tweetQueue || [];
-    if (queue.length >= 5) return;
+    if (queue.length >= DRAFT_TARGET_COUNT) return;
+    const draftNeeded = Math.max(0, DRAFT_TARGET_COUNT - queue.length);
 
-    addLog('info', '开始批量生成推文草稿...');
+    addLog('info', `开始补齐推文草稿库存，当前 ${queue.length}/${DRAFT_TARGET_COUNT}...`);
     chrome.storage.local.set({ isGenerating: true });
     chrome.runtime.sendMessage({ action: "generationStatus", status: true }).catch(() => {});
     
@@ -1470,12 +1497,12 @@ ${playbookContext}
 ${formatLeadAsset(config.onboardingStrategy)}
 ${reportContext}
 
-请生成 24 条候选推文，然后只返回你自评后最强的 20 条。必须覆盖以下内容类型：
-- opinion: 6 条，强观点/反常识/行业判断，用于涨粉和转发
-- playbook: 5 条，框架/清单/工具/步骤，用于收藏和信任
-- story: 4 条，经历/复盘/Build in Public，用于人设和共鸣
-- reply_bait: 3 条，能引发评论或站队的问题/判断
-- soft_conversion: 2 条，低压产品/服务/行动入口，不硬广
+请生成 ${Math.max(draftNeeded + 4, draftNeeded)} 条候选推文，然后只返回你自评后最强的 ${draftNeeded} 条。尽量覆盖以下内容类型：
+- opinion：强观点/反常识/行业判断，用于涨粉和转发
+- playbook：框架/清单/工具/步骤，用于收藏和信任
+- story：经历/复盘/Build in Public，用于人设和共鸣
+- reply_bait：能引发评论或站队的问题/判断
+- soft_conversion：低压产品/服务/行动入口，不硬广
 
 每条推文必须像 X 原生表达：
 - 开头第一行必须有 Hook，不要铺垫。
@@ -1516,7 +1543,7 @@ ${reportContext}
       // Clean up markdown code blocks if the model wrapped it
       const cleanJsonStr = generatedText.replace(/```json/g, '').replace(/```/g, '').trim();
       const parsedTweets = JSON.parse(cleanJsonStr);
-      const newTweets = normalizeGeneratedTweets(parsedTweets).slice(0, 20);
+      const newTweets = normalizeGeneratedTweets(parsedTweets).slice(0, draftNeeded);
       
       if (newTweets.length > 0) {
         newTweets.forEach(t => {
@@ -1528,11 +1555,17 @@ ${reportContext}
              scores: t.scores
            });
         });
+        queue = queue.slice(0, DRAFT_TARGET_COUNT);
         chrome.storage.local.set({ tweetQueue: queue, isGenerating: false }, () => {
-           addLog('success', `成功生成 ${newTweets.length} 条推文草稿`);
+           addLog('success', `成功生成 ${newTweets.length} 条推文草稿，当前库存 ${queue.length}/${DRAFT_TARGET_COUNT}`);
            chrome.runtime.sendMessage({ action: "queueCountChanged" }).catch(() => {});
            chrome.runtime.sendMessage({ action: "generationStatus", status: false }).catch(() => {});
            checkAndSetupAlarm(); // re-evaluate alarm
+        });
+      } else {
+        chrome.storage.local.set({ isGenerating: false }, () => {
+          addLog('warn', 'AI 未返回可用推文草稿，已停止本轮生成');
+          chrome.runtime.sendMessage({ action: "generationStatus", status: false }).catch(() => {});
         });
       }
     } catch (e) {
@@ -1550,7 +1583,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
        analyzeAccountPersona(changes.accountBio.newValue);
     }
     if (changes.isRunning && changes.isRunning.newValue) {
-       chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget', 'accountBio', 'aiPersona'], (res) => {
+       chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget', 'accountBio', 'aiPersona', 'tweetQueue'], (res) => {
           const errors = getConfigErrors(res);
           if (errors.length > 0) {
              addLog('error', `启动失败：${errors.join('、')}，请先到配置中心完善设置`);
@@ -1559,6 +1592,15 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
           }
           chrome.storage.local.remove(['configErrors']);
           addLog('info', '机器人已启动');
+          chrome.storage.local.set({
+             twitterCooldownUntil: 0,
+             apiCooldownUntil: 0,
+             isGeneratingReply: false,
+             isTyping: false,
+             isAutoPaused: false,
+             pauseReason: '',
+             tweetQueue: (res.tweetQueue || []).slice(0, DRAFT_TARGET_COUNT)
+          });
           const isPersonaEmpty = !res.aiPersona || (!res.aiPersona.targetUsers && !res.aiPersona.characteristics && !res.aiPersona.goals);
           if (res.accountBio && isPersonaEmpty) {
              analyzeAccountPersona(res.accountBio);
@@ -1584,7 +1626,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     }
     if (changes.tweetQueue) {
        chrome.storage.local.get(['aiPersona'], (res) => {
-          if (res.aiPersona && changes.tweetQueue.newValue && changes.tweetQueue.newValue.length < 5) {
+          if (res.aiPersona && changes.tweetQueue.newValue && changes.tweetQueue.newValue.length < DRAFT_REFILL_THRESHOLD) {
              generateAutoDrafts();
           }
        });
@@ -1599,7 +1641,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
        } else {
           chrome.storage.local.get(['tweetQueue'], (res) => {
              const q = res.tweetQueue || [];
-             if (q.length < 5) generateAutoDrafts();
+             if (q.length < DRAFT_REFILL_THRESHOLD) generateAutoDrafts();
           });
        }
     }

@@ -6,6 +6,7 @@ console.log("X Auto Bot: Scraper loaded on X.com");
 
 // Global cooldown to prevent hitting Gemini API rate limits (15 requests/min)
 const REPLY_COOLDOWN_MS = 300000; // 5 minutes
+const DRAFT_TARGET_COUNT = 20;
 const MAX_LOGS = 50;
 
 // ==========================================
@@ -187,6 +188,9 @@ function stopAutoScroll() {
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local' && changes.isRunning) {
     if (changes.isRunning.newValue) {
+      isReplying = false;
+      twitterCooldownUntil = 0;
+      apiCooldownUntil = 0;
       startAutoScroll();
       ensureBioExtracted();
     } else {
@@ -335,6 +339,40 @@ function getTweetText(tweetNode) {
   return '';
 }
 
+function stableHash(text) {
+  let hash = 0;
+  const input = String(text || '');
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash << 5) - hash) + input.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function getTweetStatusHref(tweetNode) {
+  return tweetNode.querySelector('a[href*="/status/"]')?.getAttribute('href') || '';
+}
+
+function getTweetBotId(tweetNode, author, text) {
+  if (tweetNode.dataset.botId) return tweetNode.dataset.botId;
+  const seed = getTweetStatusHref(tweetNode) || `${author}:${text.slice(0, 160)}`;
+  const id = `xbot-${stableHash(seed)}`;
+  tweetNode.dataset.botId = id;
+  return id;
+}
+
+function getAutomationMode(state = {}) {
+  return state.onboardingStrategy?.automationMode || 'review';
+}
+
+function shouldGenerateReplySuggestion(mode) {
+  return mode === 'auto' || mode === 'shadowReply';
+}
+
+function shouldSendReply(mode) {
+  return mode === 'auto';
+}
+
 let processedTweetIds = new Set();
 let isReplying = false;
 let twitterCooldownUntil = 0;
@@ -346,12 +384,14 @@ function scrapeTweets() {
   if (Date.now() < twitterCooldownUntil) return;
   if (Date.now() < apiCooldownUntil) return;
 
-  chrome.storage.local.get(['isRunning', 'isAutoPaused', 'aiPersona', 'competitorReport', 'twitterCooldownUntil', 'apiCooldownUntil'], (result) => {
+  chrome.storage.local.get(['isRunning', 'isAutoPaused', 'aiPersona', 'competitorReport', 'twitterCooldownUntil', 'apiCooldownUntil', 'onboardingStrategy'], (result) => {
     if (!result.isRunning) return;
     if (result.isAutoPaused) {
       addLog('info', '自动操作已暂停，跳过推文抓取');
       return;
     }
+    const automationMode = getAutomationMode(result);
+    if (!shouldGenerateReplySuggestion(automationMode)) return;
     if (result.twitterCooldownUntil && Date.now() < result.twitterCooldownUntil) return;
     if (result.apiCooldownUntil && Date.now() < result.apiCooldownUntil) return;
     
@@ -363,21 +403,19 @@ function scrapeTweets() {
     if (articles.length === 0) return;
     
     for (const article of articles) {
-      const tweetId = article.getAttribute('data-testid') + '_' + (article.querySelector('a[href*="/status/"]')?.getAttribute('href') || Math.random());
-      
-      if (processedTweetIds.has(tweetId)) continue;
-      processedTweetIds.add(tweetId);
-      
       const author = getTweetAuthor(article);
       const text = getTweetText(article);
       
       if (!text || text.length < 10) continue;
+
+      const tweetId = getTweetBotId(article, author, text);
+      if (processedTweetIds.has(tweetId)) continue;
+      processedTweetIds.add(tweetId);
       
       addLog('info', `发现推文 @${author}: ${text.substring(0, 50)}...`);
       
       isReplying = true;
-      twitterCooldownUntil = Date.now() + REPLY_COOLDOWN_MS;
-      chrome.storage.local.set({ twitterCooldownUntil });
+      chrome.storage.local.set({ isGeneratingReply: true });
       
       chrome.runtime.sendMessage({
         action: 'generateReply',
@@ -387,6 +425,7 @@ function scrapeTweets() {
         tweetElementId: tweetId
       }, (response) => {
         isReplying = false;
+        chrome.storage.local.set({ isGeneratingReply: false });
         if (chrome.runtime.lastError) {
           addLog('error', '生成回复失败: ' + chrome.runtime.lastError.message);
           return;
@@ -401,12 +440,27 @@ function scrapeTweets() {
         }
         const replyText = response ? (response.replyText || response.reply) : '';
         if (replyText) {
-          addLog('success', `已生成回复 @${author}: ${replyText.substring(0, 40)}...`);
+          twitterCooldownUntil = Date.now() + REPLY_COOLDOWN_MS;
+          chrome.storage.local.set({
+            twitterCooldownUntil,
+            lastReplySuggestion: {
+              tweetAuthor: author,
+              tweetContent: text,
+              replyText,
+              mode: automationMode,
+              time: Date.now()
+            }
+          });
+          addLog('success', shouldSendReply(automationMode)
+            ? `已生成回复 @${author}: ${replyText.substring(0, 40)}...`
+            : `影子回复建议 @${author}: ${replyText.substring(0, 40)}...`);
           
-          // Dispatch event for automator
-          window.dispatchEvent(new CustomEvent('xAutoBot_ReadyToReply', {
-            detail: { tweetElementId: tweetId, replyText, tweetAuthor: author, tweetContent: text }
-          }));
+          if (shouldSendReply(automationMode)) {
+            // Dispatch event for automator
+            window.dispatchEvent(new CustomEvent('xAutoBot_ReadyToReply', {
+              detail: { tweetElementId: tweetId, replyText, tweetAuthor: author, tweetContent: text }
+            }));
+          }
         }
       });
       
@@ -504,6 +558,9 @@ function renderWidget() {
   const now = Date.now();
   const isPersonaEmpty = !botState.aiPersona || (!botState.aiPersona.targetUsers && !botState.aiPersona.characteristics && !botState.aiPersona.goals);
   const qLen = botState.tweetQueue ? botState.tweetQueue.length : 0;
+  const automationMode = getAutomationMode(botState);
+  const replySuggestionEnabled = shouldGenerateReplySuggestion(automationMode);
+  const autoPublishEnabled = automationMode === 'auto';
   
   const twitterCooldownSecs = botState.twitterCooldownUntil && botState.twitterCooldownUntil > now 
     ? Math.ceil((botState.twitterCooldownUntil - now) / 1000) : 0;
@@ -539,7 +596,7 @@ function renderWidget() {
   } else if (apiCooldownSecs > 0) {
     focusStatus = `AI 接口保护中，${apiCooldownSecs}s 后重试`;
     statusClass = 'warn';
-  } else if (twitterCooldownSecs > 0) {
+  } else if (replySuggestionEnabled && twitterCooldownSecs > 0) {
     focusStatus = `互动冷却中，${twitterCooldownSecs}s 后继续`;
     statusClass = 'active';
   } else if (botState.isAnalyzingPersona) {
@@ -557,6 +614,12 @@ function renderWidget() {
   } else if (strategyGaps.length > 0) {
     focusStatus = `待补齐：${strategyGaps.join('、')}`;
     statusClass = 'warn';
+  } else if (!autoPublishEnabled && automationMode === 'review') {
+    focusStatus = '先审后发：只生成草稿，不自动发帖或回复';
+    statusClass = 'active';
+  } else if (!autoPublishEnabled && automationMode === 'shadowReply') {
+    focusStatus = '影子回复：生成评论建议，不自动发送';
+    statusClass = 'active';
   } else {
     focusStatus = '运行中：正在观察时间线和排期';
     statusClass = 'active';
@@ -896,7 +959,7 @@ function renderWidget() {
       ${milestone(botState.accountBio ? 'done' : (profileFailed ? 'failed' : 'pending'), '读取主页简介')}
       ${milestone(!isPersonaEmpty ? 'done' : 'pending', '人设与目标用户')}
       ${milestone(botState.competitorReport ? 'done' : 'pending', '竞品与爆款框架')}
-      ${milestone(qLen >= 5 ? 'done' : 'pending', '内容草稿库存', `${qLen}/20`)}
+      ${milestone(qLen >= DRAFT_TARGET_COUNT ? 'done' : 'pending', '内容草稿库存', `${qLen}/${DRAFT_TARGET_COUNT}`)}
     </div>
 
     <div class="x-bot-next-post">
