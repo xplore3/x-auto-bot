@@ -6,6 +6,7 @@ console.log("X Auto Bot: Scraper loaded on X.com");
 
 // Global cooldown to prevent hitting Gemini API rate limits (15 requests/min)
 const REPLY_COOLDOWN_MS = 300000; // 5 minutes
+const REPLY_ATTEMPT_LOCK_MS = 60000; // short lock while the automator tries to send
 const DRAFT_TARGET_COUNT = 20;
 const MAX_LOGS = 50;
 
@@ -25,6 +26,14 @@ function addLog(level, message) {
     logs.push(entry);
     if (logs.length > MAX_LOGS) logs = logs.slice(-MAX_LOGS);
     chrome.storage.local.set({ logs });
+  });
+}
+
+function incrementProcessedTweets() {
+  chrome.storage.local.get(['stats'], (res) => {
+    const stats = res.stats || { tweetsProcessed: 0, repliesSent: 0 };
+    stats.tweetsProcessed = (stats.tweetsProcessed || 0) + 1;
+    chrome.storage.local.set({ stats });
   });
 }
 
@@ -371,6 +380,90 @@ function isLowValueReplyTarget(text = '') {
   return hasUrlOnly || tooShort || mostlyEmojiOrPunctuation;
 }
 
+function parseTargetHandles(text = '') {
+  return String(text || '')
+    .split(/[\s,，、\n]+/)
+    .map(item => item.trim().replace(/^https?:\/\/(?:www\.)?(?:x|twitter)\.com\//i, '').replace(/^@/, '').split('/')[0])
+    .filter(item => /^[A-Za-z0-9_]{1,15}$/.test(item))
+    .map(item => item.toLowerCase());
+}
+
+function collectTargetHandles(state = {}) {
+  const memory = state.agentMemory || {};
+  return [...new Set([
+    ...parseTargetHandles(state.targetUsers),
+    ...parseTargetHandles(memory.interactionTargets)
+  ])];
+}
+
+function isSensitiveReplyTarget(text = '') {
+  const normalized = String(text || '').toLowerCase();
+  return [
+    /\b(trump|biden|hunter biden|maga|democrat|republican|election|president|congress|senate)\b/,
+    /\b(gaza|israel|palestine|ukraine|russia|war|military)\b/,
+    /总统|大选|民主党|共和党|拜登|特朗普|川普|战争|军事|俄乌|巴以|以色列|巴勒斯坦|加沙/
+  ].some(pattern => pattern.test(normalized));
+}
+
+function collectTopicKeywords(state = {}) {
+  const memory = state.agentMemory || {};
+  const persona = state.aiPersona || {};
+  const strategy = state.onboardingStrategy || {};
+  const base = [
+    'ai', 'agent', 'chatgpt', 'claude', 'gemini', 'openai', 'llm', 'prompt',
+    'automation', 'workflow', 'tool', 'startup', 'founder', 'indie', 'saas',
+    'product', 'growth', 'marketing', 'monetization', 'mrr', 'build in public',
+    'creator', 'research', 'investment', 'vc',
+    '人工智能', '模型', '提示词', '自动化', '工作流', '工具', '创业', '创始人',
+    '独立开发', '产品', '增长', '营销', '获客', '流量', '出海', '搞钱', '副业',
+    '变现', '商业化', '用户', '付费', '研究', '投资', '复盘'
+  ];
+  const mapped = {
+    insights: ['观点', '趋势', '判断'],
+    playbooks: ['方法', '框架', '清单', '实操'],
+    stories: ['复盘', '经历', '故事'],
+    curation: ['报告', '信息', '新闻', '拆解'],
+    softPromo: ['产品', '工具', '案例']
+  };
+  const configured = [
+    persona.targetUsers,
+    persona.characteristics,
+    persona.goals,
+    memory.contentPillars,
+    memory.contentAngles,
+    memory.audienceSegments,
+    memory.audiencePains,
+    strategy.contentCustom,
+    strategy.audienceCustom
+  ].join('\n');
+  const extracted = configured
+    .split(/[\s,，、。；;：:\n/|]+/)
+    .map(item => item.trim().toLowerCase())
+    .filter(item => item.length >= 2 && item.length <= 24);
+  const strategyKeywords = Array.isArray(strategy.content)
+    ? strategy.content.flatMap(item => mapped[item] || [])
+    : [];
+  return [...new Set([...base, ...strategyKeywords, ...extracted])];
+}
+
+function hasRelevantTopic(text = '', state = {}) {
+  const normalized = String(text || '').toLowerCase();
+  return collectTopicKeywords(state).some(keyword => normalized.includes(keyword));
+}
+
+function getReplySkipReason(author, text, state = {}) {
+  if (isSensitiveReplyTarget(text)) return '涉及政治/战争等敏感话题';
+  const targetHandles = collectTargetHandles(state);
+  const isTargetAuthor = targetHandles.includes(String(author || '').toLowerCase());
+  if (targetHandles.length > 0 && !isTargetAuthor && !hasRelevantTopic(text, state)) {
+    return '非优先互动账号，且主题与账号策略不相关';
+  }
+  if (targetHandles.length === 0 && !hasRelevantTopic(text, state)) {
+    return '主题与账号策略不相关';
+  }
+  return '';
+}
+
 function stableHash(text) {
   let hash = 0;
   const input = String(text || '');
@@ -410,13 +503,21 @@ let isReplying = false;
 let twitterCooldownUntil = 0;
 let apiCooldownUntil = 0;
 
+function rememberProcessedTweet(tweetId) {
+  processedTweetIds.add(tweetId);
+  if (processedTweetIds.size > 500) {
+    const oldest = processedTweetIds.values().next().value;
+    processedTweetIds.delete(oldest);
+  }
+}
+
 function scrapeTweets() {
   if (!chrome.runtime?.id) return;
   if (isReplying) return;
   if (Date.now() < twitterCooldownUntil) return;
   if (Date.now() < apiCooldownUntil) return;
 
-  chrome.storage.local.get(['isRunning', 'isAutoPaused', 'aiPersona', 'competitorReport', 'twitterCooldownUntil', 'apiCooldownUntil', 'onboardingStrategy'], (result) => {
+  chrome.storage.local.get(['isRunning', 'isAutoPaused', 'aiPersona', 'agentMemory', 'competitorReport', 'twitterCooldownUntil', 'apiCooldownUntil', 'onboardingStrategy', 'targetUsers'], (result) => {
     if (!result.isRunning) return;
     if (result.isAutoPaused) {
       addLog('info', '自动操作已暂停，跳过推文抓取');
@@ -439,16 +540,22 @@ function scrapeTweets() {
       const text = getTweetText(article);
       
       if (!text || text.length < 10) continue;
+      const tweetId = getTweetBotId(article, author, text);
+      if (processedTweetIds.has(tweetId)) continue;
+      rememberProcessedTweet(tweetId);
+
       if (isLowValueReplyTarget(text)) {
         addLog('info', `跳过低价值互动目标 @${author}: ${text.substring(0, 50)}...`);
         continue;
       }
+      const skipReason = getReplySkipReason(author, text, result);
+      if (skipReason) {
+        addLog('info', `跳过 @${author}: ${skipReason}。${text.substring(0, 50)}...`);
+        continue;
+      }
 
-      const tweetId = getTweetBotId(article, author, text);
-      if (processedTweetIds.has(tweetId)) continue;
-      processedTweetIds.add(tweetId);
-      
       addLog('info', `发现推文 @${author}: ${text.substring(0, 50)}...`);
+      incrementProcessedTweets();
       
       isReplying = true;
       chrome.storage.local.set({ isGeneratingReply: true });
@@ -476,7 +583,8 @@ function scrapeTweets() {
         }
         const replyText = response ? (response.replyText || response.reply) : '';
         if (replyText) {
-          twitterCooldownUntil = Date.now() + REPLY_COOLDOWN_MS;
+          const willSend = shouldSendReply(automationMode);
+          twitterCooldownUntil = Date.now() + (willSend ? REPLY_ATTEMPT_LOCK_MS : REPLY_COOLDOWN_MS);
           chrome.storage.local.set({
             twitterCooldownUntil,
             lastReplySuggestion: {
@@ -487,11 +595,11 @@ function scrapeTweets() {
               time: Date.now()
             }
           });
-          addLog('success', shouldSendReply(automationMode)
+          addLog('success', willSend
             ? `已生成回复 @${author}: ${replyText.substring(0, 40)}...`
             : `影子回复建议 @${author}: ${replyText.substring(0, 40)}...`);
           
-          if (shouldSendReply(automationMode)) {
+          if (willSend) {
             // Dispatch event for automator
             window.dispatchEvent(new CustomEvent('xAutoBot_ReadyToReply', {
               detail: { tweetElementId: tweetId, replyText, tweetAuthor: author, tweetContent: text }
@@ -652,6 +760,12 @@ function renderWidget() {
   } else if (apiCooldownSecs > 0) {
     focusStatus = `AI 接口保护中，${apiCooldownSecs}s 后重试`;
     statusClass = 'warn';
+  } else if (replySuggestionEnabled && twitterCooldownSecs > 0 && botState.lastReplyFailure?.time && now - botState.lastReplyFailure.time < 90000) {
+    focusStatus = `回复失败保护中，${twitterCooldownSecs}s 后重新观察`;
+    statusClass = 'warn';
+  } else if (replySuggestionEnabled && twitterCooldownSecs > 0 && automationMode === 'shadowReply') {
+    focusStatus = `影子回复冷却中，${twitterCooldownSecs}s 后继续生成建议`;
+    statusClass = 'active';
   } else if (replySuggestionEnabled && twitterCooldownSecs > 0) {
     focusStatus = `互动冷却中，${twitterCooldownSecs}s 后继续`;
     statusClass = 'active';

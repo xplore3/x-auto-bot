@@ -15,10 +15,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Load initial state
   chrome.storage.local.get(['isRunning', 'stats', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy'], (result) => {
     updateUI(result.isRunning, result.configErrors);
-    if (result.stats) {
-      document.getElementById('tweetsProcessed').textContent = result.stats.tweetsProcessed || 0;
-      document.getElementById('repliesSent').textContent = result.stats.repliesSent || 0;
-    }
     updateDashboard(result);
   });
 
@@ -64,6 +60,9 @@ document.addEventListener('DOMContentLoaded', () => {
   function updateDashboard(data) {
     const queueLength = getValidDraftQueue(data.tweetQueue).length;
     queueCountSpan.textContent = `${queueLength} / ${DRAFT_TARGET_COUNT}`;
+    setText('modeText', getModeLabel(data.onboardingStrategy?.automationMode));
+    setText('tweetsProcessed', data.stats?.tweetsProcessed || 0);
+    setText('repliesSent', data.stats?.repliesSent || 0);
 
     renderStrategySignal(data);
 
@@ -91,7 +90,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Listen for updates from background
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    chrome.storage.local.get(['tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'isRunning', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy'], (result) => {
+    chrome.storage.local.get(['tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'isRunning', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'stats'], (result) => {
        updateDashboard(result);
        updateUI(result.isRunning, result.configErrors);
     });
@@ -100,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Listen for storage changes
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === 'local') {
-      chrome.storage.local.get(['isRunning', 'configErrors', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy'], (result) => {
+      chrome.storage.local.get(['isRunning', 'configErrors', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'stats'], (result) => {
         updateUI(result.isRunning, result.configErrors);
         updateDashboard(result);
       });
@@ -208,5 +207,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!element) return;
     element.classList.toggle('done', Boolean(isDone));
     element.classList.toggle('warning', Boolean(hasWarning && !isDone));
+  }
+
+  function getModeLabel(mode = 'review') {
+    const labels = {
+      auto: '纯自动',
+      review: '先审后发',
+      shadowReply: '影子回复'
+    };
+    return labels[mode] || labels.review;
+  }
+
+  function setText(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
   }
 });

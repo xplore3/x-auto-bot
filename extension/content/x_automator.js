@@ -28,6 +28,28 @@ function pauseAutomation(reason) {
   }
 }
 
+function safeRuntimeMessage(message) {
+  try {
+    const result = chrome.runtime.sendMessage(message);
+    if (result?.catch) result.catch(() => {});
+  } catch (e) {
+    // Extension context may be gone during reload.
+  }
+}
+
+function notifyReplyFailed(reason) {
+  safeRuntimeMessage({ action: 'replyFailed', reason });
+}
+
+function notifyReplyCompleted(tweetAuthor, tweetContent, replyText) {
+  safeRuntimeMessage({
+    action: 'replyCompleted',
+    tweetAuthor,
+    tweetContent,
+    replyText
+  });
+}
+
 function addLog(level, message) {
   if (!chrome.runtime?.id) return;
   const entry = {
@@ -136,7 +158,9 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
     isAutomatorBusy = true;
     const tweetNode = document.querySelector(`article[data-bot-id="${tweetElementId}"]`);
     if (!tweetNode) {
-      addLog('warn', `未找到 @${author} 的目标推文节点，取消回复`);
+      const reason = `未找到 @${author} 的目标推文节点，取消回复`;
+      addLog('warn', reason);
+      notifyReplyFailed(reason);
       isAutomatorBusy = false;
       return;
     }
@@ -147,7 +171,9 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
       // 1. Click the Reply button
       const replyBtn = tweetNode.querySelector('[data-testid="reply"]');
       if (!replyBtn) {
-        addLog('warn', `未找到 @${author} 推文的回复按钮`);
+        const reason = `未找到 @${author} 推文的回复按钮`;
+        addLog('warn', reason);
+        notifyReplyFailed(reason);
         return;
       }
       replyBtn.click();
@@ -160,7 +186,9 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
       const dialog = await waitForElement(findActiveDialog, 6000);
       const draftEditor = dialog ? findTweetEditor(dialog) : findTweetEditor(document);
       if (!draftEditor) {
-        addLog('warn', '未找到回复输入框');
+        const reason = '未找到回复输入框';
+        addLog('warn', reason);
+        notifyReplyFailed(reason);
         return;
       }
       addLog('info', '已定位到输入框，准备模拟输入');
@@ -170,7 +198,9 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
       addLog('info', `已输入回复内容 (${replyText.length} 字)`);
       if (getEditorText(draftEditor) !== normalizeText(replyText)) {
         consecutiveFailures++;
-        addLog('error', `回复文本校验失败，取消发送 (连续失败 ${consecutiveFailures} 次)`);
+        const reason = `回复文本校验失败，取消发送 (连续失败 ${consecutiveFailures} 次)`;
+        addLog('error', reason);
+        notifyReplyFailed(reason);
         checkAndPause();
         return;
       }
@@ -209,7 +239,9 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
         if (!sendBtn) {
           consecutiveFailures++;
           const currentButton = dialog ? findSendButton(dialog) : findSendButton(document);
-          addLog('error', `发送按钮未自然启用，取消本次回复。文本长度 ${normalizeText(replyText).length}，按钮状态 ${getButtonDisabledReason(currentButton)} (连续失败 ${consecutiveFailures} 次)`);
+          const reason = `发送按钮未自然启用，取消本次回复。文本长度 ${normalizeText(replyText).length}，按钮状态 ${getButtonDisabledReason(currentButton)} (连续失败 ${consecutiveFailures} 次)`;
+          addLog('error', reason);
+          notifyReplyFailed(reason);
           checkAndPause();
           return;
         } else {
@@ -226,27 +258,27 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
         if (modalGone) {
           consecutiveFailures = 0;
           addLog('success', `✅ 已回复 @${author} | 原文：「${shortOriginal}」→ 回复：「${shortReply}」`);
+          notifyReplyCompleted(author, originalText, replyText);
         } else {
           consecutiveFailures++;
-          addLog('warn', `⚠️ 弹窗仍在，可能发送失败，请手动检查 @${author} 的回复 (连续失败 ${consecutiveFailures} 次)`);
+          const reason = `弹窗仍在，可能发送失败，请手动检查 @${author} 的回复 (连续失败 ${consecutiveFailures} 次)`;
+          addLog('warn', `⚠️ ${reason}`);
+          notifyReplyFailed(reason);
           checkAndPause();
         }
-        
-        // Update reply stats
-        chrome.storage.local.get(['stats'], (res) => {
-          let stats = res.stats || { tweetsProcessed: 0, repliesSent: 0 };
-          stats.repliesSent += 1;
-          chrome.storage.local.set({ stats });
-        });
       } else {
         consecutiveFailures++;
-        addLog('error', `未找到发送按钮，回复未完成 (连续失败 ${consecutiveFailures} 次)`);
+        const reason = `未找到发送按钮，回复未完成 (连续失败 ${consecutiveFailures} 次)`;
+        addLog('error', reason);
+        notifyReplyFailed(reason);
         checkAndPause();
       }
       
     } catch (error) {
       consecutiveFailures++;
-      addLog('error', `自动回复异常: ${error.message} (连续失败 ${consecutiveFailures} 次)`);
+      const reason = `自动回复异常: ${error.message} (连续失败 ${consecutiveFailures} 次)`;
+      addLog('error', reason);
+      notifyReplyFailed(reason);
       checkAndPause();
     } finally {
       chrome.storage.local.set({ isTyping: false });

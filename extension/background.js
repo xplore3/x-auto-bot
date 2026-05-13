@@ -4,6 +4,8 @@ const MAX_LOGS = 50;
 const DRAFT_TARGET_COUNT = 20;
 const DRAFT_REFILL_THRESHOLD = 5;
 const FIRST_AUTO_POST_DELAY_MS = 60 * 1000;
+const REPLY_COOLDOWN_MS = 5 * 60 * 1000;
+const REPLY_RETRY_LOCK_MS = 60 * 1000;
 
 const DEFAULT_AGENT_MEMORY = {
   identity: '',
@@ -494,6 +496,38 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const reason = request.reason || '发帖失败，请人工检查';
     addLog('error', reason);
     chrome.storage.local.set({ isAutoPaused: true, pauseReason: reason });
+    sendResponse({ success: true });
+  } else if (request.action === "replyCompleted") {
+    const author = request.tweetAuthor || '未知用户';
+    const replyText = request.replyText || '';
+    const twitterCooldownUntil = Date.now() + REPLY_COOLDOWN_MS;
+    chrome.storage.local.get(['stats'], (res) => {
+      const stats = res.stats || { tweetsProcessed: 0, repliesSent: 0 };
+      stats.repliesSent = (stats.repliesSent || 0) + 1;
+      chrome.storage.local.set({
+        stats,
+        twitterCooldownUntil,
+        lastReplySent: {
+          tweetAuthor: author,
+          replyText,
+          time: Date.now()
+        }
+      }, () => {
+        addLog('success', `确认已回复 @${author}，进入 ${Math.round(REPLY_COOLDOWN_MS / 60000)} 分钟互动冷却`);
+        sendResponse({ success: true });
+      });
+    });
+    return true;
+  } else if (request.action === "replyFailed") {
+    const reason = request.reason || '回复未完成，请检查 X 弹窗状态';
+    addLog('warn', reason);
+    chrome.storage.local.set({
+      twitterCooldownUntil: Date.now() + REPLY_RETRY_LOCK_MS,
+      lastReplyFailure: {
+        reason,
+        time: Date.now()
+      }
+    });
     sendResponse({ success: true });
   } else if (request.action === "extractBio" || request.action === "openProfileTab") {
     const rawUrl = request.url || request.profileUrl || request.profilePath || '';
