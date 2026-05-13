@@ -3,6 +3,7 @@
 const MAX_LOGS = 50;
 const DRAFT_TARGET_COUNT = 20;
 const DRAFT_REFILL_THRESHOLD = 5;
+const FIRST_AUTO_POST_DELAY_MS = 60 * 1000;
 
 const DEFAULT_AGENT_MEMORY = {
   identity: '',
@@ -730,6 +731,7 @@ function checkAndSetupAlarm() {
       });
     } else {
       chrome.alarms.clear("postTweetAlarm");
+      chrome.storage.local.set({ nextPostTime: '等待草稿生成' });
     }
   });
 }
@@ -764,6 +766,12 @@ function scheduleNextPost() {
     if (postsToday >= postsPerDay) {
       addLog('info', `今日已发 ${postsToday}/${postsPerDay} 条，暂停发推至次日`);
       scheduleForTomorrow(now, res);
+      return;
+    }
+
+    if (postsToday === 0) {
+      const firstRunTime = new Date(now.getTime() + FIRST_AUTO_POST_DELAY_MS);
+      setAlarmAtDate(firstRunTime, '纯自动发布：启动后快速执行第一条发推');
       return;
     }
     
@@ -846,10 +854,15 @@ function setAlarm(targetHour, targetMin, addDays) {
   if (targetTime.getTime() <= now.getTime()) {
       targetTime = new Date(now.getTime() + 5 * 60000); // fallback 5 mins later
   }
-  
-  const when = targetTime.getTime();
-  chrome.alarms.create("postTweetAlarm", { when: when });
-  addLog('info', `已安排下一次发推: ${targetTime.toLocaleString()}`);
+
+  setAlarmAtDate(targetTime);
+}
+
+function setAlarmAtDate(targetTime, reason = '已安排下一次发推') {
+  chrome.alarms.clear("postTweetAlarm", () => {
+    chrome.alarms.create("postTweetAlarm", { when: targetTime.getTime() });
+  });
+  addLog('info', `${reason}: ${targetTime.toLocaleString()}`);
   chrome.storage.local.set({ nextPostTime: targetTime.toLocaleString() }, () => {
       chrome.runtime.sendMessage({ action: "queueCountChanged" }).catch(() => {});
   });
