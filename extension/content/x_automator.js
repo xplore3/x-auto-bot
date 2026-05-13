@@ -63,13 +63,31 @@ function getEditorText(element) {
   return normalizeText(element?.innerText || element?.textContent || element?.value || '');
 }
 
-function findTweetEditor() {
-  return document.querySelector('div[data-testid="tweetTextarea_0"]');
+function findTweetEditor(scope = document) {
+  const root = scope || document;
+  return root.querySelector('[data-testid="tweetTextarea_0"][role="textbox"][contenteditable="true"]')
+    || root.querySelector('[data-testid="tweetTextarea_0"] [role="textbox"][contenteditable="true"]')
+    || root.querySelector('[role="textbox"][contenteditable="true"][aria-label]')
+    || root.querySelector('div[data-testid="tweetTextarea_0"]');
+}
+
+function findActiveDialog() {
+  const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+  return dialogs.find(dialog => findTweetEditor(dialog)) || dialogs[0] || null;
 }
 
 function findSendButton(scope) {
   const root = scope || document;
   return root.querySelector('[data-testid="tweetButton"]') || root.querySelector('[data-testid="tweetButtonInline"]');
+}
+
+function getButtonDisabledReason(button) {
+  if (!button) return 'button-not-found';
+  return [
+    button.disabled ? 'disabled=true' : '',
+    button.getAttribute('aria-disabled') ? `aria-disabled=${button.getAttribute('aria-disabled')}` : '',
+    button.getAttribute('disabled') !== null ? 'disabled-attr' : ''
+  ].filter(Boolean).join(', ') || 'unknown';
 }
 
 async function waitForElement(getter, timeout = 8000, interval = 250) {
@@ -139,7 +157,8 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
       await sleep(1500); 
 
       // 2. Find the input field inside the modal
-      const draftEditor = document.querySelector('div[data-testid="tweetTextarea_0"]');
+      const dialog = await waitForElement(findActiveDialog, 6000);
+      const draftEditor = dialog ? findTweetEditor(dialog) : findTweetEditor(document);
       if (!draftEditor) {
         addLog('warn', '未找到回复输入框');
         return;
@@ -157,7 +176,6 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
       }
 
       // 4. Find send button INSIDE the dialog (not globally)
-      const dialog = draftEditor.closest('div[role="dialog"]') || document.querySelector('div[role="dialog"]');
       let sendBtn = null;
       
       if (dialog) {
@@ -184,13 +202,14 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
         addLog('info', `找到发送按钮，当前 disabled=${sendBtn.disabled}, aria-disabled=${sendBtn.getAttribute('aria-disabled')}`);
         
         sendBtn = await waitForEnabledButton(() => {
-          const d = document.querySelector('div[role="dialog"]');
+          const d = findActiveDialog();
           return d ? findSendButton(d) : findSendButton(document);
-        }, 6000);
+        }, 10000);
         
         if (!sendBtn) {
           consecutiveFailures++;
-          addLog('error', `发送按钮未自然启用，取消本次回复 (连续失败 ${consecutiveFailures} 次)`);
+          const currentButton = dialog ? findSendButton(dialog) : findSendButton(document);
+          addLog('error', `发送按钮未自然启用，取消本次回复。文本长度 ${normalizeText(replyText).length}，按钮状态 ${getButtonDisabledReason(currentButton)} (连续失败 ${consecutiveFailures} 次)`);
           checkAndPause();
           return;
         } else {
@@ -237,36 +256,81 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
 });
 
 async function simulateTyping(element, text) {
+  const normalized = normalizeText(text);
+  const methods = [
+    insertByExecCommand,
+    insertByPasteEvent,
+    insertByDirectInput
+  ];
+
+  for (const method of methods) {
+    try {
+      await method(element, normalized);
+      await sleep(650);
+      if (getEditorText(element) === normalized) {
+        await sleep(1200);
+        return;
+      }
+    } catch (error) {
+      addLog('warn', `输入方法失败，尝试下一种: ${error.message}`);
+    }
+  }
+
+  await sleep(1200);
+}
+
+async function prepareEditor(element) {
   element.focus();
   element.click();
-  const normalized = normalizeText(text);
-  
+  await sleep(120);
+  try {
+    document.execCommand('selectAll', false, null);
+    document.execCommand('delete', false, null);
+  } catch (e) {
+    // Some pages block execCommand; fallback methods below still run.
+  }
   if (element.isContentEditable) {
     element.textContent = '';
-    document.execCommand('insertText', false, normalized);
   } else {
-    element.value = normalized;
+    element.value = '';
   }
-  
-  // 触发完整的事件序列让 React 识别到内容变化
-  element.dispatchEvent(new Event('focus', { bubbles: true }));
-  element.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, inputType: 'insertText', data: normalized }));
-  element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: normalized }));
-  element.dispatchEvent(new Event('change', { bubbles: true }));
-  element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'a' }));
-  element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
+  element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }));
+}
 
-  if (getEditorText(element) !== normalized) {
-    if (element.isContentEditable) {
-      element.textContent = normalized;
-    } else {
-      element.value = normalized;
-    }
-    element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: normalized }));
-    element.dispatchEvent(new Event('change', { bubbles: true }));
+async function insertByExecCommand(element, text) {
+  await prepareEditor(element);
+  document.execCommand('insertText', false, text);
+  element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+  element.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+async function insertByPasteEvent(element, text) {
+  await prepareEditor(element);
+  const data = new DataTransfer();
+  data.setData('text/plain', text);
+  const pasteEvent = new ClipboardEvent('paste', {
+    bubbles: true,
+    cancelable: true,
+    clipboardData: data
+  });
+  element.dispatchEvent(pasteEvent);
+  if (getEditorText(element) !== text) {
+    document.execCommand('insertText', false, text);
   }
-  
-  await sleep(2000); // 给 React 足够时间更新状态和启用按钮
+  element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste', data: text }));
+  element.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+async function insertByDirectInput(element, text) {
+  await prepareEditor(element);
+  if (element.isContentEditable) {
+    element.textContent = text;
+  } else {
+    element.value = text;
+  }
+  element.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, inputType: 'insertText', data: text }));
+  element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+  element.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 function simulateRealClick(element) {

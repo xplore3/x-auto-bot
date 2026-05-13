@@ -1006,14 +1006,36 @@ async function generateAIResponse(tweetContent) {
       });
       const personaContext = `\n【你的账号人设与特征】：${config.aiPersona?.characteristics || '未填写'}\n【你的核心引流目标】：${config.aiPersona?.goals || config.leadTarget}\n${formatLeadAsset(config.onboardingStrategy)}\n【你的长期记忆】\n${formatAgentMemory(config.agentMemory)}\n${formatGrowthPlaybook(playbook)}\n请严格符合上述人设、观点边界、内容模板和互动策略进行回复。\n`;
       
-      const prompt = config.promptTemplate
-        .replace('{tweet}', tweetContent)
-        .replace('{leadTarget}', config.leadTarget || '无引流目标，请正常进行幽默回复即可')
-        + personaContext;
+      const prompt = `你是一个严格的 X 评论筛选与回复 Agent。
+
+先判断这条推文是否值得回复。以下情况必须只返回 SKIP：
+- 互动钓鱼、求曝光、求评论、求关注、抽奖、无信息量口号
+- 与账号定位、目标读者、内容方向明显无关
+- 回复后只能显得蹭流量、硬广、尬聊
+- 推文上下文不足，无法补充一个具体判断
+
+如果值得回复，再写一条自然、有信息增量的短回复：
+- 不超过 70 个中文字符，或目标语言下同等长度
+- 先补充观点/经验/反问，不要上来推销
+- 不要说“看我主页/私信我/翻我主页”，除非原文明确在求资源
+- 不要承诺收益，不要编造事实，不要攻击个人
+
+${config.promptTemplate
+  .replace('{tweet}', tweetContent)
+  .replace('{leadTarget}', config.leadTarget || '无引流目标，请正常回复')}
+${personaContext}
+
+只返回 SKIP 或回复正文。`;
       
       try {
         const generatedText = await callLLM(prompt, config, false);
-        resolve(generatedText.trim());
+        const reply = generatedText.trim().replace(/^["']|["']$/g, '');
+        if (/^skip[.!。！]*$/i.test(reply)) {
+          addLog('info', `AI 判定不适合回复，已跳过: ${tweetContent.substring(0, 50)}...`);
+          resolve('');
+          return;
+        }
+        resolve(reply);
       } catch (e) {
         console.warn("X Auto Bot: API Rate limit or fetch error", e);
         reject(e);

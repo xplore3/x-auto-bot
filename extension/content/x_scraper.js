@@ -339,6 +339,38 @@ function getTweetText(tweetNode) {
   return '';
 }
 
+function isLowValueReplyTarget(text = '') {
+  const normalized = String(text || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!normalized) return true;
+
+  const engagementBaitPatterns = [
+    /\bjust say\b/,
+    /\bsay ["']?hey["']?\b/,
+    /\bneed .*impressions?\b/,
+    /\bthank me later\b/,
+    /\breply\b.*\b(i|me|this|below)\b/,
+    /\bcomment\b.*\b(i|me|below|for)\b/,
+    /\bdrop\b.*\b(reply|comment|handle|link)\b/,
+    /\bfollow (me|for|back)\b/,
+    /\blike (and|&)?\s*(rt|repost|share)\b/,
+    /\b(rt|repost) (if|and|to)\b/,
+    /\bwho wants\b/,
+    /\btag someone\b/,
+    /转发.*抽/,
+    /评论.*领取/,
+    /回复.*领取/,
+    /求.*互/
+  ];
+
+  if (engagementBaitPatterns.some(pattern => pattern.test(normalized))) return true;
+
+  const words = normalized.split(/\s+/).filter(Boolean);
+  const hasUrlOnly = /https?:\/\/|pic\.x\.com|t\.co\//.test(normalized) && words.length < 10;
+  const tooShort = normalized.length < 28 && words.length < 8;
+  const mostlyEmojiOrPunctuation = normalized.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}\p{P}\p{S}\s]/gu, '').length < 8;
+  return hasUrlOnly || tooShort || mostlyEmojiOrPunctuation;
+}
+
 function stableHash(text) {
   let hash = 0;
   const input = String(text || '');
@@ -407,6 +439,10 @@ function scrapeTweets() {
       const text = getTweetText(article);
       
       if (!text || text.length < 10) continue;
+      if (isLowValueReplyTarget(text)) {
+        addLog('info', `跳过低价值互动目标 @${author}: ${text.substring(0, 50)}...`);
+        continue;
+      }
 
       const tweetId = getTweetBotId(article, author, text);
       if (processedTweetIds.has(tweetId)) continue;
