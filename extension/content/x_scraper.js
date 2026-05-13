@@ -477,10 +477,7 @@ setInterval(scrapeTweets, 5000);
 let botState = {};
 let logPanelOpen = false;
 
-chrome.storage.local.get(null, (res) => {
-  botState = res || {};
-  renderWidget();
-});
+refreshBotStateFromStorage();
 
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local') {
@@ -504,6 +501,11 @@ setInterval(() => {
 setInterval(() => {
   renderWidget();
 }, 1000);
+
+// 定期从 Chrome storage 重新拉取全量状态，避免 X 页面小组件显示旧缓存。
+setInterval(() => {
+  refreshBotStateFromStorage();
+}, 3000);
 
 function ensureWidget() {
   if (!chrome.runtime?.id) return;
@@ -541,6 +543,24 @@ function getWidgetConfigErrors(state) {
   return errors;
 }
 
+function getValidDraftQueue(queue = []) {
+  if (!Array.isArray(queue)) return [];
+  return queue
+    .filter((item) => {
+      const text = typeof item === 'string' ? item : item?.text;
+      return typeof text === 'string' && text.trim().length > 0;
+    })
+    .slice(0, DRAFT_TARGET_COUNT);
+}
+
+function refreshBotStateFromStorage() {
+  if (!chrome.runtime?.id) return;
+  chrome.storage.local.get(null, (res) => {
+    botState = res || {};
+    renderWidget();
+  });
+}
+
 function renderWidget() {
   if (!chrome.runtime?.id) return;
   
@@ -557,7 +577,7 @@ function renderWidget() {
 
   const now = Date.now();
   const isPersonaEmpty = !botState.aiPersona || (!botState.aiPersona.targetUsers && !botState.aiPersona.characteristics && !botState.aiPersona.goals);
-  const qLen = botState.tweetQueue ? botState.tweetQueue.length : 0;
+  const qLen = getValidDraftQueue(botState.tweetQueue).length;
   const automationMode = getAutomationMode(botState);
   const replySuggestionEnabled = shouldGenerateReplySuggestion(automationMode);
   const autoPublishEnabled = automationMode === 'auto';

@@ -1,4 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
+  const DRAFT_TARGET_COUNT = 20;
   const toggleBtn = document.getElementById('toggleBtn');
   const statusIndicator = document.getElementById('statusIndicator');
   const statusText = document.getElementById('statusText');
@@ -61,8 +62,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   function updateDashboard(data) {
-    const queueLength = data.tweetQueue ? data.tweetQueue.length : 0;
-    queueCountSpan.textContent = queueLength + " / 20";
+    const queueLength = getValidDraftQueue(data.tweetQueue).length;
+    queueCountSpan.textContent = `${queueLength} / ${DRAFT_TARGET_COUNT}`;
 
     renderStrategySignal(data);
 
@@ -156,6 +157,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function firstFilled(...values) {
     return values.find(value => typeof value === 'string' && value.trim()) || '';
+  }
+
+  function getValidDraftQueue(queue = []) {
+    if (!Array.isArray(queue)) return [];
+    return queue
+      .filter((item) => {
+        const text = typeof item === 'string' ? item : item?.text;
+        return typeof text === 'string' && text.trim().length > 0;
+      })
+      .slice(0, DRAFT_TARGET_COUNT);
   }
 
   function compactText(text, limit) {

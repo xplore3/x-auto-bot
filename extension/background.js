@@ -353,6 +353,27 @@ function normalizeGeneratedTweets(parsed) {
     .sort((a, b) => b.score - a.score);
 }
 
+function normalizeDraftQueue(queue = []) {
+  const rawItems = Array.isArray(queue) ? queue : [];
+  return rawItems
+    .map((item) => {
+      const rawText = typeof item === 'string' ? item : item?.text;
+      const text = formatTweetForX(rawText);
+      if (!text) return null;
+      const scores = scoreObject(item?.scores || {});
+      const storedScore = Number(item?.viralScore);
+      return {
+        id: typeof item === 'object' && item ? item.id ?? null : null,
+        text,
+        type: typeof item === 'object' && item ? memoryValueToText(item.type || 'unknown') : 'legacy',
+        viralScore: Number.isFinite(storedScore) ? storedScore : totalViralScore(scores),
+        scores
+      };
+    })
+    .filter(Boolean)
+    .slice(0, DRAFT_TARGET_COUNT);
+}
+
 function addLog(level, message) {
   const entry = {
     time: Date.now(),
@@ -700,7 +721,7 @@ function checkAndSetupAlarm() {
       chrome.storage.local.set({ nextPostTime: '先审后发：等待人工确认' });
       return;
     }
-    const queue = result.tweetQueue || [];
+    const queue = normalizeDraftQueue(result.tweetQueue);
     if (queue.length > 0) {
       chrome.alarms.get("postTweetAlarm", (alarm) => {
         if (!alarm) {
@@ -853,7 +874,7 @@ function executeNextPost() {
       addLog('info', '自动操作已暂停，跳过本次发推执行');
       return;
     }
-    let queue = result.tweetQueue || [];
+    let queue = normalizeDraftQueue(result.tweetQueue);
     if (queue.length === 0) {
       checkAndSetupAlarm();
       return;
@@ -935,7 +956,7 @@ function handlePostCompleted(source) {
       if (result.lastPostDate !== todayStr) postsToday = 0;
       updates.postsToday = postsToday + 1;
       updates.lastPostDate = todayStr;
-      const queue = result.tweetQueue || [];
+      const queue = normalizeDraftQueue(result.tweetQueue);
       if (result.pendingPostId !== null && result.pendingPostId !== undefined) {
         updates.tweetQueue = queue.filter(item => item.id !== result.pendingPostId);
       } else if (queue[0] && queue[0].text === result.pendingPost) {
@@ -1461,7 +1482,11 @@ async function generateAutoDrafts() {
       }
       return;
     }
-    let queue = config.tweetQueue || [];
+    const rawQueue = Array.isArray(config.tweetQueue) ? config.tweetQueue : [];
+    let queue = normalizeDraftQueue(rawQueue);
+    if (queue.length !== rawQueue.length) {
+      chrome.storage.local.set({ tweetQueue: queue });
+    }
     if (queue.length >= DRAFT_TARGET_COUNT) return;
     const draftNeeded = Math.max(0, DRAFT_TARGET_COUNT - queue.length);
 
@@ -1599,7 +1624,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
              isTyping: false,
              isAutoPaused: false,
              pauseReason: '',
-             tweetQueue: (res.tweetQueue || []).slice(0, DRAFT_TARGET_COUNT)
+             tweetQueue: normalizeDraftQueue(res.tweetQueue)
           });
           const isPersonaEmpty = !res.aiPersona || (!res.aiPersona.targetUsers && !res.aiPersona.characteristics && !res.aiPersona.goals);
           if (res.accountBio && isPersonaEmpty) {
@@ -1626,7 +1651,12 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     }
     if (changes.tweetQueue) {
        chrome.storage.local.get(['aiPersona'], (res) => {
-          if (res.aiPersona && changes.tweetQueue.newValue && changes.tweetQueue.newValue.length < DRAFT_REFILL_THRESHOLD) {
+          const queue = normalizeDraftQueue(changes.tweetQueue.newValue);
+          if (queue.length !== (Array.isArray(changes.tweetQueue.newValue) ? changes.tweetQueue.newValue.length : 0)) {
+             chrome.storage.local.set({ tweetQueue: queue });
+             return;
+          }
+          if (res.aiPersona && changes.tweetQueue.newValue && queue.length < DRAFT_REFILL_THRESHOLD) {
              generateAutoDrafts();
           }
        });
@@ -1640,7 +1670,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
           });
        } else {
           chrome.storage.local.get(['tweetQueue'], (res) => {
-             const q = res.tweetQueue || [];
+             const q = normalizeDraftQueue(res.tweetQueue);
              if (q.length < DRAFT_REFILL_THRESHOLD) generateAutoDrafts();
           });
        }
