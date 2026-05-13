@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const stepQueue = document.getElementById('stepQueue');
 
   // Load initial state
-  chrome.storage.local.get(['isRunning', 'stats', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy'], (result) => {
+  chrome.storage.local.get(['isRunning', 'stats', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postDeliveryMode'], (result) => {
     updateUI(result.isRunning, result.configErrors);
     updateDashboard(result);
   });
@@ -60,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function updateDashboard(data) {
     const queueLength = getValidDraftQueue(data.tweetQueue).length;
     queueCountSpan.textContent = `${queueLength} / ${DRAFT_TARGET_COUNT}`;
-    setText('modeText', getModeLabel(data.onboardingStrategy?.automationMode));
+    setText('modeText', `${getModeLabel(data.onboardingStrategy?.automationMode)} · ${getDeliveryModeLabel(data.postDeliveryMode)}`);
     setText('tweetsProcessed', data.stats?.tweetsProcessed || 0);
     setText('repliesSent', data.stats?.repliesSent || 0);
 
@@ -90,7 +90,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Listen for updates from background
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    chrome.storage.local.get(['tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'isRunning', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'stats'], (result) => {
+    chrome.storage.local.get(['tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'isRunning', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postDeliveryMode', 'stats'], (result) => {
        updateDashboard(result);
        updateUI(result.isRunning, result.configErrors);
     });
@@ -99,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Listen for storage changes
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === 'local') {
-      chrome.storage.local.get(['isRunning', 'configErrors', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'stats'], (result) => {
+      chrome.storage.local.get(['isRunning', 'configErrors', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postDeliveryMode', 'stats'], (result) => {
         updateUI(result.isRunning, result.configErrors);
         updateDashboard(result);
       });
@@ -216,6 +216,14 @@ document.addEventListener('DOMContentLoaded', () => {
       shadowReply: '影子回复'
     };
     return labels[mode] || labels.review;
+  }
+
+  function getDeliveryModeLabel(mode = 'localQueue') {
+    const labels = {
+      localQueue: '本地发',
+      xNativeSchedule: 'X 定时'
+    };
+    return labels[mode] || labels.localQueue;
   }
 
   function setText(id, text) {

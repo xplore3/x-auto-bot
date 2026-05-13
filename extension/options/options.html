@@ -43,7 +43,7 @@
           <div>
             <p class="eyebrow">Agent Chat</p>
             <h2>专用 X 发声对话台</h2>
-            <p class="panel-intro">这里不是通用大模型对话。每次交流都会尽量转化为：账号偏好、内容素材、表达规则、评论引流策略或可发布草稿。</p>
+            <p class="panel-intro">这里不是通用大模型对话。每次交流都会尽量转化为：账号偏好、内容素材、表达规则、评论引流策略或可发布内容。</p>
           </div>
           <span class="panel-tag">Memory Writer</span>
         </div>
@@ -381,6 +381,11 @@
             <p>按目标语言和时区切换活跃窗口。</p>
           </div>
           <div class="plan-card">
+            <span>发布交付</span>
+            <strong id="planDeliveryMode">本地到点自动发</strong>
+            <p>挂机时生成内容队列；可选择写入 X 原生定时发布，后续由 X 自己按时发布。</p>
+          </div>
+          <div class="plan-card">
             <span>涨粉目标</span>
             <strong id="planGrowthGoal">首月新增 1000 粉丝</strong>
             <p>展示为计划目标，不做收益或结果承诺。</p>
@@ -402,7 +407,7 @@
             </button>
             <button class="choice-card is-selected" type="button" data-choice-group="automationMode" data-value="review" aria-pressed="true">
               <strong>先审后发</strong>
-              <span>Agent 先生成草稿，你确认后再发，适合绝大多数新用户。</span>
+              <span>Agent 先生成待确认内容，你确认后再发，适合绝大多数新用户。</span>
             </button>
             <button class="choice-card" type="button" data-choice-group="automationMode" data-value="shadowReply" aria-pressed="false">
               <strong>影子回复</strong>
@@ -444,7 +449,7 @@
               <option value="qwen">通义千问 Qwen</option>
               <option value="deepseek">DeepSeek</option>
             </select>
-            <p class="help-text">用于生成回复、草稿、账号画像和竞品分析。</p>
+            <p class="help-text">用于生成回复、内容队列、账号画像和竞品分析。</p>
           </div>
 
           <div class="form-group">
@@ -462,6 +467,15 @@
 
         <p class="section-caption">发布节奏</p>
         <div class="field-grid compact">
+          <div class="form-group span-2">
+            <label for="postDeliveryMode">发布交付方式</label>
+            <select id="postDeliveryMode">
+              <option value="localQueue">本地到点自动发（Chrome/X 页面需要在线）</option>
+              <option value="xNativeSchedule">写入 X 原生定时发布（挂机时一次性排程）</option>
+            </select>
+            <p class="help-text">推荐想“挂机一段时间就排好后续内容”的用户选择 X 原生定时发布；若 X 页面结构变化导致排程失败，会暂停并写日志。</p>
+          </div>
+
           <div class="form-group">
             <label for="postsPerDay">每日最大发推数</label>
             <input type="number" id="postsPerDay" min="1" max="50" value="5">
@@ -738,7 +752,7 @@
           <div class="form-group">
             <label for="weeklyReviewSignals">复盘信号池</label>
             <textarea id="weeklyReviewSignals" rows="9" placeholder="记录哪些帖子涨粉、哪些评论带来回复、哪些选题收藏高、哪些表达引发误解。"></textarea>
-            <p class="help-text">建议每周维护一次。这里的内容会作为长期记忆的一部分，影响后续草稿生成。</p>
+            <p class="help-text">建议每周维护一次。这里的内容会作为长期记忆的一部分，影响后续内容生成。</p>
           </div>
 
           <div class="form-group">

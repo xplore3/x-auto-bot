@@ -725,6 +725,7 @@ function renderWidget() {
   const automationMode = getAutomationMode(botState);
   const replySuggestionEnabled = shouldGenerateReplySuggestion(automationMode);
   const autoPublishEnabled = automationMode === 'auto';
+  const xNativeScheduleMode = botState.postDeliveryMode === 'xNativeSchedule';
   
   const twitterCooldownSecs = botState.twitterCooldownUntil && botState.twitterCooldownUntil > now 
     ? Math.ceil((botState.twitterCooldownUntil - now) / 1000) : 0;
@@ -752,7 +753,7 @@ function renderWidget() {
     focusStatus = botState.pauseReason || '已暂停，等待人工检查';
     statusClass = 'error';
   } else if (botState.isTyping) {
-    focusStatus = '正在处理发布或回复动作';
+    focusStatus = xNativeScheduleMode ? '正在写入 X 原生定时发布' : '正在处理发布或回复动作';
     statusClass = 'active';
   } else if (botState.isGeneratingReply) {
     focusStatus = '正在生成互动回复';
@@ -776,7 +777,7 @@ function renderWidget() {
     focusStatus = '正在整理竞品和爆款框架';
     statusClass = 'active';
   } else if (botState.isGenerating) {
-    focusStatus = '正在生成内容草稿';
+    focusStatus = '正在生成 Agent 内容队列';
     statusClass = 'active';
   } else if (profileFailed && isPersonaEmpty) {
     focusStatus = '简介读取失败：请在长期记忆中心手动填写人设';
@@ -785,13 +786,13 @@ function renderWidget() {
     focusStatus = `待补齐：${strategyGaps.join('、')}`;
     statusClass = 'warn';
   } else if (!autoPublishEnabled && automationMode === 'review') {
-    focusStatus = '先审后发：只生成草稿，不自动发帖或回复';
+    focusStatus = '先审后发：只生成待确认内容，不自动发帖或回复';
     statusClass = 'active';
   } else if (!autoPublishEnabled && automationMode === 'shadowReply') {
     focusStatus = '影子回复：生成评论建议，不自动发送';
     statusClass = 'active';
   } else {
-    focusStatus = '运行中：正在观察时间线和排期';
+    focusStatus = xNativeScheduleMode ? '运行中：生成内容并写入 X 定时发布' : '运行中：正在观察时间线和本地排期';
     statusClass = 'active';
   }
 
@@ -1129,12 +1130,12 @@ function renderWidget() {
       ${milestone(botState.accountBio ? 'done' : (profileFailed ? 'failed' : 'pending'), '读取主页简介')}
       ${milestone(!isPersonaEmpty ? 'done' : 'pending', '人设与目标用户')}
       ${milestone(botState.competitorReport ? 'done' : 'pending', '竞品与爆款框架')}
-      ${milestone(qLen >= DRAFT_TARGET_COUNT ? 'done' : 'pending', '内容草稿库存', `${qLen}/${DRAFT_TARGET_COUNT}`)}
+      ${milestone(qLen >= DRAFT_TARGET_COUNT ? 'done' : 'pending', 'Agent 内容队列', `${qLen}/${DRAFT_TARGET_COUNT}`)}
     </div>
 
     <div class="x-bot-next-post">
       <div class="x-bot-mini-stat">
-        <span>下次发布</span>
+        <span>${xNativeScheduleMode ? 'X 定时排程' : '下次本地发布'}</span>
         <strong>${escapeHtml(nextPostStr)}</strong>
       </div>
       <div class="x-bot-mini-stat">

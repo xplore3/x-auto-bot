@@ -6,6 +6,8 @@ const DRAFT_REFILL_THRESHOLD = 5;
 const FIRST_AUTO_POST_DELAY_MS = 60 * 1000;
 const REPLY_COOLDOWN_MS = 5 * 60 * 1000;
 const REPLY_RETRY_LOCK_MS = 60 * 1000;
+const POST_DELIVERY_MODE_LOCAL = 'localQueue';
+const POST_DELIVERY_MODE_X_SCHEDULE = 'xNativeSchedule';
 
 const DEFAULT_AGENT_MEMORY = {
   identity: '',
@@ -365,12 +367,18 @@ function normalizeDraftQueue(queue = []) {
       if (!text) return null;
       const scores = scoreObject(item?.scores || {});
       const storedScore = Number(item?.viralScore);
+      const scheduledAt = Number(item?.scheduledAt);
+      const nativeScheduleStatus = ['queued', 'scheduled', 'failed'].includes(item?.nativeScheduleStatus)
+        ? item.nativeScheduleStatus
+        : '';
       return {
         id: typeof item === 'object' && item ? item.id ?? null : null,
         text,
         type: typeof item === 'object' && item ? memoryValueToText(item.type || 'unknown') : 'legacy',
         viralScore: Number.isFinite(storedScore) ? storedScore : totalViralScore(scores),
-        scores
+        scores,
+        scheduledAt: Number.isFinite(scheduledAt) ? scheduledAt : null,
+        nativeScheduleStatus
       };
     })
     .filter(Boolean)
@@ -409,7 +417,8 @@ chrome.runtime.onInstalled.addListener((details) => {
         agentMemory: DEFAULT_AGENT_MEMORY,
         agentChatMessages: [],
         postInterval: 30,
-        replyInterval: 30
+        replyInterval: 30,
+        postDeliveryMode: POST_DELIVERY_MODE_LOCAL
       });
     }
   });
@@ -480,6 +489,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         pendingPost: text,
         pendingPostId: null,
         pendingPostSource: 'manualTest',
+        pendingScheduledAt: null,
         isAutoPaused: false,
         pauseReason: ''
       }, () => {
@@ -578,6 +588,10 @@ function getAutomationMode(config = {}) {
 
 function canAutoPublish(config = {}) {
   return getAutomationMode(config) === 'auto';
+}
+
+function getPostDeliveryMode(config = {}) {
+  return config.postDeliveryMode || POST_DELIVERY_MODE_LOCAL;
 }
 
 function handleXLoginDetected() {
@@ -746,7 +760,7 @@ async function callLLM(prompt, config, requireJson = false) {
 }
 
 function checkAndSetupAlarm() {
-  chrome.storage.local.get(['tweetQueue', 'isRunning', 'onboardingStrategy'], (result) => {
+  chrome.storage.local.get(['tweetQueue', 'isRunning', 'onboardingStrategy', 'postDeliveryMode'], (result) => {
     if (!result.isRunning) {
        chrome.alarms.clear("postTweetAlarm");
        return;
@@ -757,6 +771,16 @@ function checkAndSetupAlarm() {
       return;
     }
     const queue = normalizeDraftQueue(result.tweetQueue);
+    if (getPostDeliveryMode(result) === POST_DELIVERY_MODE_X_SCHEDULE) {
+      chrome.alarms.clear("postTweetAlarm");
+      if (queue.length > 0) {
+        chrome.storage.local.set({ nextPostTime: `写入 X 定时发布：待处理 ${queue.length} 条` });
+        scheduleNativeQueue();
+      } else {
+        chrome.storage.local.set({ nextPostTime: '等待内容队列生成' });
+      }
+      return;
+    }
     if (queue.length > 0) {
       chrome.alarms.get("postTweetAlarm", (alarm) => {
         if (!alarm) {
@@ -765,7 +789,7 @@ function checkAndSetupAlarm() {
       });
     } else {
       chrome.alarms.clear("postTweetAlarm");
-      chrome.storage.local.set({ nextPostTime: '等待草稿生成' });
+      chrome.storage.local.set({ nextPostTime: '等待内容队列生成' });
     }
   });
 }
@@ -902,6 +926,112 @@ function setAlarmAtDate(targetTime, reason = '已安排下一次发推') {
   });
 }
 
+function chooseMinute(start = 0) {
+  const min = Math.max(0, Math.min(59, Number(start) || 0));
+  return min + Math.floor(Math.random() * Math.max(1, 60 - min));
+}
+
+function buildSmartSchedulePlan(count, config = {}) {
+  const now = new Date();
+  const slots = parseTimeSlots(config.smartTimeSlots);
+  if (slots.length === 0) {
+    slots.push({ start: 8, end: 10 }, { start: 12, end: 14 }, { start: 19, end: 23 });
+  }
+  const postsPerDay = Math.max(1, Number(config.postsPerDay) || 5);
+  const plan = [];
+  let dayOffset = 0;
+
+  while (plan.length < count && dayOffset < 21) {
+    const baseDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset, 0, 0, 0, 0);
+    const availableSlots = slots
+      .map((slot) => {
+        const range = Math.max(1, slot.end - slot.start);
+        const hour = slot.start + Math.floor(Math.random() * range);
+        const minute = chooseMinute();
+        return new Date(baseDay.getFullYear(), baseDay.getMonth(), baseDay.getDate(), hour, minute, 0, 0);
+      })
+      .filter(date => date.getTime() > now.getTime() + 5 * 60000)
+      .sort((a, b) => a.getTime() - b.getTime());
+
+    availableSlots.slice(0, postsPerDay).forEach(date => {
+      if (plan.length < count) plan.push(date.getTime());
+    });
+    dayOffset++;
+  }
+
+  return plan;
+}
+
+function buildIntervalSchedulePlan(count, config = {}) {
+  const interval = Math.max(15, Number(config.postInterval) || 60) * 60000;
+  const firstAt = Date.now() + Math.max(interval, 10 * 60000);
+  return Array.from({ length: count }, (_, index) => firstAt + index * interval);
+}
+
+function buildPostSchedulePlan(count, config = {}) {
+  if (count <= 0) return [];
+  return (config.postScheduleMode || 'smart') === 'interval'
+    ? buildIntervalSchedulePlan(count, config)
+    : buildSmartSchedulePlan(count, config);
+}
+
+function ensureNativeScheduleTimes(queue = [], config = {}) {
+  const normalized = normalizeDraftQueue(queue);
+  const missing = normalized.filter(item => !item.scheduledAt || item.nativeScheduleStatus === 'failed');
+  const plan = buildPostSchedulePlan(missing.length, config);
+  let planIndex = 0;
+
+  return normalized.map((item) => {
+    if (item.nativeScheduleStatus === 'scheduled') return item;
+    if (item.scheduledAt && item.nativeScheduleStatus !== 'failed') return item;
+    return {
+      ...item,
+      scheduledAt: plan[planIndex++] || Date.now() + (planIndex + 1) * 30 * 60000,
+      nativeScheduleStatus: 'queued'
+    };
+  });
+}
+
+function formatScheduleTime(ts) {
+  const date = new Date(Number(ts));
+  return Number.isFinite(date.getTime()) ? date.toLocaleString() : '未设置';
+}
+
+function scheduleNativeQueue() {
+  chrome.storage.local.get([
+    'tweetQueue', 'pendingPost', 'isRunning', 'isAutoPaused', 'onboardingStrategy',
+    'postDeliveryMode', 'postsPerDay', 'postScheduleMode', 'smartTimeSlots', 'postInterval'
+  ], (result) => {
+    if (!result.isRunning || result.isAutoPaused || !canAutoPublish(result)) return;
+    if (getPostDeliveryMode(result) !== POST_DELIVERY_MODE_X_SCHEDULE) return;
+    if (result.pendingPost) {
+      addLog('info', '已有待处理发布任务，等待当前 X 定时发布完成');
+      return;
+    }
+
+    let queue = ensureNativeScheduleTimes(result.tweetQueue, result);
+    const nextTweet = queue.find(item => item.nativeScheduleStatus !== 'scheduled');
+    if (!nextTweet) {
+      chrome.storage.local.set({ tweetQueue: queue, nextPostTime: 'X 定时发布已全部写入' });
+      return;
+    }
+
+    queue = queue.map(item => item.id === nextTweet.id ? { ...item, nativeScheduleStatus: 'queued' } : item);
+    chrome.storage.local.set({
+      tweetQueue: queue,
+      pendingPost: nextTweet.text,
+      pendingPostId: nextTweet.id || null,
+      pendingPostSource: POST_DELIVERY_MODE_X_SCHEDULE,
+      pendingScheduledAt: nextTweet.scheduledAt,
+      nextPostTime: `正在写入 X 定时发布：${formatScheduleTime(nextTweet.scheduledAt)}`
+    }, () => {
+      addLog('info', `准备写入 X 原生定时发布：${formatScheduleTime(nextTweet.scheduledAt)}`);
+      triggerPostInTab();
+      chrome.runtime.sendMessage({ action: "queueCountChanged" }).catch(() => {});
+    });
+  });
+}
+
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "postTweetAlarm") {
     addLog('info', '定时器触发，准备执行发推');
@@ -910,11 +1040,17 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 function executeNextPost() {
-  chrome.storage.local.get(['tweetQueue', 'pendingPost', 'postsToday', 'lastPostDate', 'postsPerDay', 'isAutoPaused', 'onboardingStrategy'], (result) => {
+  chrome.storage.local.get(['tweetQueue', 'pendingPost', 'postsToday', 'lastPostDate', 'postsPerDay', 'isAutoPaused', 'onboardingStrategy', 'postDeliveryMode'], (result) => {
     if (!canAutoPublish(result)) {
       addLog('info', '当前为先审后发/影子模式，跳过自动发推执行');
       chrome.alarms.clear("postTweetAlarm");
       chrome.storage.local.set({ nextPostTime: '先审后发：等待人工确认' });
+      return;
+    }
+    if (getPostDeliveryMode(result) === POST_DELIVERY_MODE_X_SCHEDULE) {
+      addLog('info', '当前为 X 原生定时发布模式，改为写入 X 定时器');
+      chrome.alarms.clear("postTweetAlarm");
+      scheduleNativeQueue();
       return;
     }
     if (result.isAutoPaused) {
@@ -987,11 +1123,12 @@ function triggerPostInTab() {
 }
 
 function handlePostCompleted(source) {
-  chrome.storage.local.get(['postsToday', 'lastPostDate', 'tweetQueue', 'pendingPost', 'pendingPostId'], (result) => {
+  chrome.storage.local.get(['postsToday', 'lastPostDate', 'tweetQueue', 'pendingPost', 'pendingPostId', 'nativeScheduledCount'], (result) => {
     const updates = {
       pendingPost: null,
       pendingPostId: null,
       pendingPostSource: null,
+      pendingScheduledAt: null,
       isAutoPaused: false,
       pauseReason: ''
     };
@@ -1010,13 +1147,22 @@ function handlePostCompleted(source) {
         updates.tweetQueue = queue.slice(1);
       }
       addLog('success', `队列推文发送成功，今日已发 ${updates.postsToday} 条`);
+    } else if (source === POST_DELIVERY_MODE_X_SCHEDULE) {
+      const queue = normalizeDraftQueue(result.tweetQueue);
+      updates.tweetQueue = queue.filter(item => item.id !== result.pendingPostId);
+      updates.nativeScheduledCount = (Number(result.nativeScheduledCount) || 0) + 1;
+      addLog('success', `X 原生定时发布写入成功，剩余 ${updates.tweetQueue.length} 条待处理`);
     } else {
       addLog('success', '测试推文发送成功');
     }
 
     chrome.storage.local.set(updates, () => {
-      chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource']);
-      checkAndSetupAlarm();
+      chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingScheduledAt']);
+      if (source === POST_DELIVERY_MODE_X_SCHEDULE) {
+        setTimeout(scheduleNativeQueue, 2500);
+      } else {
+        checkAndSetupAlarm();
+      }
       chrome.runtime.sendMessage({ action: "queueCountChanged" }).catch(() => {});
     });
   });
@@ -1130,7 +1276,7 @@ async function handleAgentChat(message) {
         const agentMemory = mergeChatMemory(config.agentMemory, memoryPatch);
         const assistantEntry = {
           role: 'assistant',
-          content: `我先把这条输入记录进素材池。\n\n当前还缺少 API Key 或模型配置，所以我不能做深度拆解。配置好模型后，我会把这类输入进一步转成：选题角度、表达规则、评论策略或可发布草稿。`,
+          content: `我先把这条输入记录进素材池。\n\n当前还缺少 API Key 或模型配置，所以我不能做深度拆解。配置好模型后，我会把这类输入进一步转成：选题角度、表达规则、评论策略或可发布内容。`,
           time: Date.now()
         };
         const nextMessages = [...messages, userEntry, assistantEntry].slice(-60);
@@ -1542,12 +1688,17 @@ ${formatGrowthPlaybook(playbook)}
 }
 
 async function generateAutoDrafts() {
-  chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'leadTarget', 'isRunning', 'tweetQueue', 'isGenerating', 'aiPersona', 'agentMemory', 'accountBio', 'competitorReport', 'onboardingStrategy'], async (config) => {
+  chrome.storage.local.get([
+    'apiKey', 'apiProvider', 'aiModel', 'leadTarget', 'isRunning', 'tweetQueue',
+    'isGenerating', 'aiPersona', 'agentMemory', 'accountBio', 'competitorReport',
+    'onboardingStrategy', 'postDeliveryMode', 'postsPerDay', 'postScheduleMode',
+    'smartTimeSlots', 'postInterval'
+  ], async (config) => {
     const errors = getConfigErrors(config);
     const isPersonaEmpty = !config.aiPersona || (!config.aiPersona.targetUsers && !config.aiPersona.characteristics && !config.aiPersona.goals);
     if (!config.isRunning || errors.length > 0 || config.isGenerating || isPersonaEmpty) {
       if (errors.length > 0) {
-        addLog('warn', `配置不完整，无法生成草稿：${errors.join('、')}`);
+        addLog('warn', `配置不完整，无法生成内容队列：${errors.join('、')}`);
       }
       return;
     }
@@ -1559,7 +1710,7 @@ async function generateAutoDrafts() {
     if (queue.length >= DRAFT_TARGET_COUNT) return;
     const draftNeeded = Math.max(0, DRAFT_TARGET_COUNT - queue.length);
 
-    addLog('info', `开始补齐推文草稿库存，当前 ${queue.length}/${DRAFT_TARGET_COUNT}...`);
+    addLog('info', `开始补齐 Agent 内容队列，当前 ${queue.length}/${DRAFT_TARGET_COUNT}...`);
     chrome.storage.local.set({ isGenerating: true });
     chrome.runtime.sendMessage({ action: "generationStatus", status: true }).catch(() => {});
     
@@ -1646,24 +1797,29 @@ ${reportContext}
              text: t.text,
              type: t.type,
              viralScore: t.score,
-             scores: t.scores
+             scores: t.scores,
+             scheduledAt: null,
+             nativeScheduleStatus: ''
            });
         });
         queue = queue.slice(0, DRAFT_TARGET_COUNT);
+        if (getPostDeliveryMode(config) === POST_DELIVERY_MODE_X_SCHEDULE) {
+          queue = ensureNativeScheduleTimes(queue, config);
+        }
         chrome.storage.local.set({ tweetQueue: queue, isGenerating: false }, () => {
-           addLog('success', `成功生成 ${newTweets.length} 条推文草稿，当前库存 ${queue.length}/${DRAFT_TARGET_COUNT}`);
+           addLog('success', `成功生成 ${newTweets.length} 条内容，当前 Agent 队列 ${queue.length}/${DRAFT_TARGET_COUNT}`);
            chrome.runtime.sendMessage({ action: "queueCountChanged" }).catch(() => {});
            chrome.runtime.sendMessage({ action: "generationStatus", status: false }).catch(() => {});
            checkAndSetupAlarm(); // re-evaluate alarm
         });
       } else {
         chrome.storage.local.set({ isGenerating: false }, () => {
-          addLog('warn', 'AI 未返回可用推文草稿，已停止本轮生成');
+          addLog('warn', 'AI 未返回可用内容，已停止本轮生成');
           chrome.runtime.sendMessage({ action: "generationStatus", status: false }).catch(() => {});
         });
       }
     } catch (e) {
-      addLog('error', `草稿生成失败: ${e.message}`);
+      addLog('error', `内容队列生成失败: ${e.message}`);
       chrome.storage.local.set({ isGenerating: false });
       chrome.runtime.sendMessage({ action: "generationStatus", status: false }).catch(() => {});
     }
@@ -1706,7 +1862,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     } else if (changes.isRunning && !changes.isRunning.newValue) {
        addLog('info', '机器人已停止');
        chrome.alarms.clear("postTweetAlarm");
-       chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource']);
+       chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingScheduledAt']);
     }
     if (changes.isAutoPaused && changes.isAutoPaused.oldValue && !changes.isAutoPaused.newValue) {
        chrome.storage.local.get(['pendingPost', 'pendingPostSource', 'isRunning'], (res) => {

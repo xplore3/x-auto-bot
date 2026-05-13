@@ -47,6 +47,11 @@ const DEFAULT_ONBOARDING_STRATEGY = {
   firstTweetText: ''
 };
 
+const POST_DELIVERY_MODE_LABELS = {
+  localQueue: '本地到点自动发',
+  xNativeSchedule: '写入 X 原生定时发布'
+};
+
 const AGENT_MEMORY_FIELD_IDS = {
   identity: 'memoryIdentity',
   marketPosition: 'marketPosition',
@@ -247,6 +252,7 @@ function initOptions() {
   bind('saveBtnMirror', 'click', saveOptions);
   bind('apiProvider', 'change', toggleModelInput);
   bind('postScheduleMode', 'change', toggleScheduleMode);
+  bind('postDeliveryMode', 'change', updatePlanPreview);
   bind('testPostBtn', 'click', testPostNow);
   bind('analyzeSourceBtn', 'click', analyzeSourceNow);
   bind('buildPlanBtn', 'click', buildGrowthPlan);
@@ -556,8 +562,10 @@ function createPlan(strategy) {
 function updatePlanPreview() {
   const strategy = getOnboardingStrategyFromForm();
   const plan = createPlan(strategy);
+  const postDeliveryMode = document.getElementById('postDeliveryMode')?.value || 'localQueue';
   setText('planPostCount', plan.postCountLabel);
   setText('planSchedule', plan.schedule);
+  setText('planDeliveryMode', POST_DELIVERY_MODE_LABELS[postDeliveryMode] || POST_DELIVERY_MODE_LABELS.localQueue);
   setText('planGrowthGoal', plan.growthGoal);
 }
 
@@ -584,6 +592,7 @@ function saveOptions(options = {}, afterSave) {
   const leadTarget = document.getElementById('leadTarget').value.trim();
   const postsPerDay = parseInt(document.getElementById('postsPerDay').value, 10) || 5;
   const postScheduleMode = document.getElementById('postScheduleMode').value;
+  const postDeliveryMode = document.getElementById('postDeliveryMode').value;
   const smartTimeSlots = document.getElementById('smartTimeSlots').value.trim();
   const postInterval = parseInt(document.getElementById('postInterval').value, 10) || 30;
   const aiTargetUsers = document.getElementById('aiTargetUsers').value;
@@ -625,6 +634,7 @@ function saveOptions(options = {}, afterSave) {
       leadTarget,
       postsPerDay,
       postScheduleMode,
+      postDeliveryMode,
       smartTimeSlots,
       postInterval,
       aiPersona: persona,
@@ -1266,6 +1276,7 @@ function restoreOptions() {
     leadTarget: '',
     postsPerDay: 5,
     postScheduleMode: 'smart',
+    postDeliveryMode: 'localQueue',
     smartTimeSlots: '9-11,12-14,20-23',
     postInterval: 30,
     aiPersona: { targetUsers: '', characteristics: '', goals: '' },
@@ -1290,6 +1301,7 @@ function restoreOptions() {
     document.getElementById('leadTarget').value = items.leadTarget;
     document.getElementById('postsPerDay').value = items.postsPerDay;
     document.getElementById('postScheduleMode').value = items.postScheduleMode;
+    document.getElementById('postDeliveryMode').value = items.postDeliveryMode;
     document.getElementById('smartTimeSlots').value = items.smartTimeSlots;
     document.getElementById('postInterval').value = items.postInterval;
     document.getElementById('aiTargetUsers').value = items.aiPersona.targetUsers || '';

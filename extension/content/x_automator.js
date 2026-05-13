@@ -5,6 +5,7 @@
 console.log("X Auto Bot: Automator loaded on X.com");
 
 const MAX_LOGS = 50;
+const POST_DELIVERY_MODE_X_SCHEDULE = 'xNativeSchedule';
 let isAutomatorBusy = false;
 let consecutiveFailures = 0;
 
@@ -101,6 +102,31 @@ function findActiveDialog() {
 function findSendButton(scope) {
   const root = scope || document;
   return root.querySelector('[data-testid="tweetButton"]') || root.querySelector('[data-testid="tweetButtonInline"]');
+}
+
+function isVisibleElement(element) {
+  if (!element) return false;
+  const rect = element.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
+function findButtonByText(scope, patterns = []) {
+  const root = scope || document;
+  return Array.from(root.querySelectorAll('button, [role="button"]'))
+    .filter(isVisibleElement)
+    .find((button) => {
+      const text = `${button.innerText || ''} ${button.getAttribute('aria-label') || ''} ${button.getAttribute('title') || ''}`;
+      return patterns.some(pattern => pattern.test(text));
+    });
+}
+
+function findScheduleButton(scope = document) {
+  const root = scope || document;
+  return root.querySelector('[data-testid="scheduleOption"]')
+    || root.querySelector('button[aria-label*="Schedule"]')
+    || root.querySelector('button[aria-label*="定时"]')
+    || root.querySelector('button[aria-label*="安排"]')
+    || findButtonByText(root, [/schedule/i, /定时|安排|日程/]);
 }
 
 function getButtonDisabledReason(button) {
@@ -385,6 +411,148 @@ function simulateRealClick(element) {
   element.dispatchEvent(new MouseEvent('click', eventInit));
 }
 
+function dispatchFormEvents(element) {
+  element.dispatchEvent(new Event('input', { bubbles: true }));
+  element.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function selectOptionByCandidates(select, candidates = []) {
+  const normalized = candidates.map(value => String(value).toLowerCase());
+  const option = Array.from(select.options || []).find((item) => {
+    const text = String(item.textContent || '').trim().toLowerCase();
+    const value = String(item.value || '').trim().toLowerCase();
+    return normalized.some(candidate => text === candidate || value === candidate || text.includes(candidate));
+  });
+  if (!option) return false;
+  select.value = option.value;
+  dispatchFormEvents(select);
+  return true;
+}
+
+function classifyScheduleSelect(select) {
+  const label = `${select.getAttribute('aria-label') || ''} ${select.name || ''} ${select.id || ''}`.toLowerCase();
+  const optionsText = Array.from(select.options || []).map(option => option.textContent || option.value || '').join(' ').toLowerCase();
+  if (/month|月|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec/.test(label + optionsText)) return 'month';
+  if (/year|年/.test(label) || /\b20\d{2}\b/.test(optionsText)) return 'year';
+  if (/day|日|号/.test(label)) return 'day';
+  if (/hour|时|点/.test(label)) return 'hour';
+  if (/minute|分/.test(label)) return 'minute';
+  if (/am|pm|上午|下午/.test(label + optionsText)) return 'ampm';
+  return '';
+}
+
+function fillNativeSelectSchedule(dialog, scheduledAt) {
+  const selects = Array.from(dialog.querySelectorAll('select')).filter(isVisibleElement);
+  if (selects.length < 3) return false;
+
+  const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+  const shortMonthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const month = scheduledAt.getMonth() + 1;
+  const day = scheduledAt.getDate();
+  const year = scheduledAt.getFullYear();
+  const hour24 = scheduledAt.getHours();
+  const hour12 = hour24 % 12 || 12;
+  const minute = scheduledAt.getMinutes();
+  const ampm = hour24 >= 12 ? 'PM' : 'AM';
+  const used = new Set();
+
+  const setByType = (type, candidates) => {
+    const select = selects.find(item => !used.has(item) && classifyScheduleSelect(item) === type);
+    if (!select) return false;
+    const ok = selectOptionByCandidates(select, candidates);
+    if (ok) used.add(select);
+    return ok;
+  };
+
+  setByType('month', [month, String(month), String(month).padStart(2, '0'), monthNames[month - 1], shortMonthNames[month - 1], `${month}月`]);
+  setByType('day', [day, String(day), String(day).padStart(2, '0')]);
+  setByType('year', [year, String(year)]);
+  setByType('hour', [hour12, hour24, String(hour12), String(hour24).padStart(2, '0')]);
+  setByType('minute', [minute, String(minute).padStart(2, '0'), String(minute)]);
+  setByType('ampm', [ampm, ampm.toLowerCase(), ampm === 'AM' ? '上午' : '下午']);
+
+  const remaining = selects.filter(item => !used.has(item));
+  const fallbackValues = [
+    [month, String(month), String(month).padStart(2, '0'), monthNames[month - 1], shortMonthNames[month - 1], `${month}月`],
+    [day, String(day), String(day).padStart(2, '0')],
+    [year, String(year)],
+    [hour12, hour24, String(hour12), String(hour24).padStart(2, '0')],
+    [minute, String(minute).padStart(2, '0'), String(minute)],
+    [ampm, ampm.toLowerCase(), ampm === 'AM' ? '上午' : '下午']
+  ];
+  remaining.forEach((select, index) => {
+    selectOptionByCandidates(select, fallbackValues[index] || []);
+  });
+
+  return true;
+}
+
+function fillNativeInputSchedule(dialog, scheduledAt) {
+  const inputs = Array.from(dialog.querySelectorAll('input')).filter(isVisibleElement);
+  if (inputs.length === 0) return false;
+  const dateValue = scheduledAt.toISOString().slice(0, 10);
+  const timeValue = `${String(scheduledAt.getHours()).padStart(2, '0')}:${String(scheduledAt.getMinutes()).padStart(2, '0')}`;
+  let touched = false;
+
+  inputs.forEach((input) => {
+    const label = `${input.type || ''} ${input.getAttribute('aria-label') || ''} ${input.name || ''} ${input.placeholder || ''}`.toLowerCase();
+    if (/date|日期/.test(label)) {
+      input.value = dateValue;
+      dispatchFormEvents(input);
+      touched = true;
+    } else if (/time|时间|hour|minute|小时|分钟/.test(label)) {
+      input.value = timeValue;
+      dispatchFormEvents(input);
+      touched = true;
+    }
+  });
+  return touched;
+}
+
+async function applyNativeSchedule(scheduledAt) {
+  const scheduleDate = new Date(Number(scheduledAt));
+  if (!Number.isFinite(scheduleDate.getTime())) {
+    pauseAutomation('X 定时发布时间无效，已暂停');
+    return false;
+  }
+
+  const scheduleBtn = await waitForElement(() => findScheduleButton(document), 8000);
+  if (!scheduleBtn) {
+    pauseAutomation('未找到 X 定时发布按钮，无法写入原生定时发布');
+    return false;
+  }
+  simulateRealClick(scheduleBtn);
+  addLog('info', '已打开 X 定时发布面板');
+  await sleep(1200);
+
+  const scheduleDialog = await waitForElement(() => {
+    const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+    return dialogs.find(dialog => /schedule|定时|安排|日程|date|time|日期|时间/i.test(dialog.innerText || ''));
+  }, 8000);
+  if (!scheduleDialog) {
+    pauseAutomation('未找到 X 定时发布弹窗，已暂停');
+    return false;
+  }
+
+  const selected = fillNativeSelectSchedule(scheduleDialog, scheduleDate) || fillNativeInputSchedule(scheduleDialog, scheduleDate);
+  if (!selected) {
+    pauseAutomation('无法识别 X 定时发布日期/时间控件，已暂停');
+    return false;
+  }
+  addLog('info', `已填写 X 定时发布时间：${scheduleDate.toLocaleString()}`);
+  await sleep(500);
+
+  const confirmBtn = findButtonByText(scheduleDialog, [/confirm/i, /done/i, /schedule/i, /确认|完成|设定|安排|定时/]);
+  if (!confirmBtn) {
+    pauseAutomation('未找到 X 定时发布时间确认按钮，已暂停');
+    return false;
+  }
+  simulateRealClick(confirmBtn);
+  addLog('info', '已确认 X 定时发布时间');
+  await sleep(1500);
+  return true;
+}
+
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -406,8 +574,9 @@ async function handlePendingPost() {
     return;
   }
   if (!chrome.runtime?.id) return;
-  chrome.storage.local.get(['pendingPost', 'pendingPostSource', 'isRunning'], async (result) => {
+  chrome.storage.local.get(['pendingPost', 'pendingPostSource', 'pendingScheduledAt', 'isRunning'], async (result) => {
     const isManualTest = result.pendingPostSource === 'manualTest';
+    const isNativeSchedule = result.pendingPostSource === POST_DELIVERY_MODE_X_SCHEDULE;
     if (!result.isRunning && !isManualTest) {
       addLog('info', '机器人已停止，跳过发推');
       return;
@@ -420,7 +589,7 @@ async function handlePendingPost() {
     const postText = String(result.pendingPost || '').trim();
     const expectedText = normalizeText(postText);
     
-    addLog('info', isManualTest ? '开始执行测试发文...' : '开始执行定时发文...');
+    addLog('info', isManualTest ? '开始执行测试发文...' : (isNativeSchedule ? '开始写入 X 原生定时发布...' : '开始执行定时发文...'));
     chrome.storage.local.set({ isTyping: true });
     try {
       if (!postText) {
@@ -458,6 +627,11 @@ async function handlePendingPost() {
       }
 
       addLog('success', `推文文本校验通过 (${postText.length} 字)`);
+
+      if (isNativeSchedule) {
+        const scheduled = await applyNativeSchedule(result.pendingScheduledAt);
+        if (!scheduled) return;
+      }
 
       const postDialog = draftEditor.closest('div[role="dialog"]') || document.querySelector('div[role="dialog"]');
       let sendBtn = postDialog ? findSendButton(postDialog) : findSendButton(document);
@@ -503,13 +677,13 @@ async function handlePendingPost() {
       }
 
       consecutiveFailures = 0;
-      addLog('success', isManualTest ? '测试推文发送成功！' : '定时推文发送成功！');
+      addLog('success', isManualTest ? '测试推文发送成功！' : (isNativeSchedule ? 'X 原生定时发布创建成功！' : '定时推文发送成功！'));
       chrome.runtime.sendMessage({
         action: 'postCompleted',
         source: result.pendingPostSource || 'queue'
       }, () => {
         if (chrome.runtime.lastError) {
-          chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource']);
+          chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingScheduledAt']);
         }
       });
       
