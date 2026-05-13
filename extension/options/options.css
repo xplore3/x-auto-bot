@@ -17,10 +17,6 @@
   box-sizing: border-box;
 }
 
-html {
-  scroll-behavior: smooth;
-}
-
 body {
   margin: 0;
   background: var(--bg);
@@ -152,6 +148,14 @@ h1 {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+}
+
+.module-panel {
+  display: none;
+}
+
+.module-panel.is-active {
+  display: block;
 }
 
 .panel-head {
@@ -329,6 +333,59 @@ h1 {
   margin: 0;
   color: var(--muted);
   font-size: 12px;
+  line-height: 1.45;
+}
+
+.quick-start {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.quick-card {
+  display: grid;
+  gap: 8px;
+  min-height: 136px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fbfcfd;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.quick-card:hover {
+  border-color: rgba(15, 139, 214, 0.5);
+  background: var(--primary-soft);
+}
+
+.quick-card span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.quick-card strong {
+  display: block;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.quick-card em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
   line-height: 1.45;
 }
 
@@ -1281,6 +1338,7 @@ code {
   .source-layout,
   .source-input-row,
   .chat-layout,
+  .quick-start,
   .blueprint-actions,
   .blueprint-grid,
   .memory-overview,

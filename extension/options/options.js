@@ -191,6 +191,48 @@ const ANALYSIS_MESSAGES = [
   '正在组装长期记忆...'
 ];
 
+const MODULE_META = {
+  'agent-chat': {
+    eyebrow: 'Agent Console',
+    title: '和你的 X 发声 Agent 一起调内容',
+    description: '把看到的好帖子、突然冒出的想法、复盘结论或新的偏好丢给 Agent。它不是通用聊天，而是专门把输入沉淀成 X 账号长期记忆、内容方向和下一步发声动作。'
+  },
+  onboarding: {
+    eyebrow: 'Launch Wizard',
+    title: '用一个链接生成账号定位',
+    description: '输入产品、X 主页、竞品网站或想模仿的账号，然后用多选卡片确认方向。Agent 会把选择写入长期记忆和内容策略。'
+  },
+  blueprint: {
+    eyebrow: 'Growth Blueprint',
+    title: '制定可执行的涨粉计划',
+    description: '确认每日内容数量、发布时间、自动化模式和第一条测试推文。先建立稳定节奏，再逐步扩大互动。'
+  },
+  runtime: {
+    eyebrow: 'Runtime',
+    title: '配置模型和发布节奏',
+    description: '这里处理 Agent 的底层连接和发帖参数。普通用户只需要填 API Key，其他选项保持默认即可。'
+  },
+  'advanced-memory': {
+    eyebrow: 'Knowledge Base',
+    title: '维护 Agent 的长期记忆',
+    description: '这里决定 Agent 是谁、服务谁、讲什么、怎么讲，以及哪些话不能说。大多数内容可以由对话台和启动向导自动写入。'
+  },
+  diagnostics: {
+    eyebrow: 'Test & Review',
+    title: '测试发布链路并复盘效果',
+    description: '先验证中文发帖、登录态、日志和失败保护，再把有效内容信号沉淀回知识库。'
+  },
+  logs: {
+    eyebrow: 'Activity Log',
+    title: '查看 Agent 行动记录',
+    description: '后台调度、发帖、回复、失败暂停和 AI 生成动作都在这里记录，用来判断系统是否稳定工作。'
+  }
+};
+
+const MODULE_ALIASES = {
+  'strategy-wizard': 'onboarding'
+};
+
 let analysisTimer = null;
 let analysisStartedAt = 0;
 let sourceAnalysisRunning = false;
@@ -198,6 +240,7 @@ let sourceAnalysisLocked = false;
 let optionsRestored = false;
 let autoSaveTimer = null;
 let retainedStrategyArchetype = DEFAULT_ONBOARDING_STRATEGY.strategyArchetype;
+let activeModule = 'agent-chat';
 
 function initOptions() {
   bind('saveBtn', 'click', saveOptions);
@@ -215,6 +258,7 @@ function initOptions() {
   bind('agentChatForm', 'submit', sendAgentChat);
   initChoiceCards();
   initChatPromptChips();
+  initModuleNavigation();
   initAutoSave();
   loadInlineLogs();
   restoreOptions();
@@ -270,6 +314,64 @@ function initChatPromptChips() {
       input.focus();
     });
   });
+}
+
+function normalizeModuleId(moduleId) {
+  const cleanId = String(moduleId || '').replace(/^#/, '');
+  return MODULE_ALIASES[cleanId] || (MODULE_META[cleanId] ? cleanId : 'agent-chat');
+}
+
+function initModuleNavigation() {
+  document.querySelectorAll('[data-module-link]').forEach((link) => {
+    link.addEventListener('click', (event) => {
+      event.preventDefault();
+      showModule(link.dataset.moduleLink, { updateHash: true, scrollTop: true });
+    });
+  });
+
+  document.querySelectorAll('[data-open-module]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      showModule(button.dataset.openModule, { updateHash: true, scrollTop: true });
+    });
+  });
+
+  window.addEventListener('hashchange', () => {
+    showModule(window.location.hash, { updateHash: false, scrollTop: true });
+  });
+
+  showModule(window.location.hash || activeModule, { updateHash: false, scrollTop: false });
+}
+
+function showModule(moduleId, options = {}) {
+  const nextModule = normalizeModuleId(moduleId);
+  activeModule = nextModule;
+
+  document.querySelectorAll('.module-panel').forEach((panel) => {
+    panel.classList.toggle('is-active', panel.dataset.module === nextModule);
+  });
+
+  document.querySelectorAll('[data-module-link]').forEach((link) => {
+    const isCurrent = normalizeModuleId(link.dataset.moduleLink) === nextModule;
+    link.classList.toggle('is-current', isCurrent);
+    if (isCurrent) {
+      link.setAttribute('aria-current', 'page');
+    } else {
+      link.removeAttribute('aria-current');
+    }
+  });
+
+  const meta = MODULE_META[nextModule] || MODULE_META['agent-chat'];
+  setTextIn('.page-header .eyebrow', meta.eyebrow);
+  setTextIn('.page-header h1', meta.title);
+  setTextIn('.page-header p:last-child', meta.description);
+
+  if (options.updateHash) {
+    history.pushState(null, '', `#${nextModule}`);
+  }
+  if (options.scrollTop) {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }
 }
 
 function scheduleAutoSave() {
@@ -461,6 +563,11 @@ function updatePlanPreview() {
 
 function setText(id, text) {
   const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+function setTextIn(selector, text) {
+  const el = document.querySelector(selector);
   if (el) el.textContent = text;
 }
 

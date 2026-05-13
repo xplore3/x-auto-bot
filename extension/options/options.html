@@ -18,13 +18,13 @@
       </div>
       <nav class="primary-nav">
         <span class="nav-label">Workspace</span>
-        <a href="#agent-chat" class="is-current">工作台</a>
-        <a href="#blueprint">任务</a>
-        <a href="#runtime">模型</a>
-        <a href="#strategy-wizard">渠道</a>
-        <a href="#advanced-memory">记忆</a>
-        <a href="#logs">日志</a>
-        <a href="#runtime">设置</a>
+        <a href="#agent-chat" class="is-current" data-module-link="agent-chat">对话台</a>
+        <a href="#onboarding" data-module-link="onboarding">启动向导</a>
+        <a href="#blueprint" data-module-link="blueprint">涨粉计划</a>
+        <a href="#runtime" data-module-link="runtime">模型发布</a>
+        <a href="#advanced-memory" data-module-link="advanced-memory">知识库</a>
+        <a href="#diagnostics" data-module-link="diagnostics">测试复盘</a>
+        <a href="#logs" data-module-link="logs">行动日志</a>
       </nav>
     </aside>
 
@@ -38,7 +38,7 @@
         <button id="saveBtn" class="btn-primary">保存 Agent</button>
       </header>
 
-      <section class="panel chat-panel" id="agent-chat">
+      <section class="panel chat-panel module-panel is-active" id="agent-chat" data-module="agent-chat">
         <div class="panel-head">
           <div>
             <p class="eyebrow">Agent Chat</p>
@@ -79,9 +79,27 @@
             </div>
           </aside>
         </div>
+
+        <div class="quick-start">
+          <button class="quick-card" type="button" data-open-module="onboarding">
+            <span>01</span>
+            <strong>从链接建立定位</strong>
+            <em>输入产品、主页或竞品，AI 先给你一版可确认的人设和内容方向。</em>
+          </button>
+          <button class="quick-card" type="button" data-open-module="blueprint">
+            <span>02</span>
+            <strong>生成涨粉计划</strong>
+            <em>确认每日发几条、什么时候发、第一条测试推文怎么写。</em>
+          </button>
+          <button class="quick-card" type="button" data-open-module="diagnostics">
+            <span>03</span>
+            <strong>测试并复盘</strong>
+            <em>先验证中文发帖和日志，再把有效信号写回长期记忆。</em>
+          </button>
+        </div>
       </section>
 
-      <section class="panel setup-panel" id="onboarding">
+      <section class="panel setup-panel module-panel" id="onboarding" data-module="onboarding">
         <div class="panel-head">
           <div>
             <p class="eyebrow">Step 1</p>
@@ -117,7 +135,7 @@
         </div>
       </section>
 
-      <section class="panel wizard-panel" id="strategy-wizard">
+      <section class="panel wizard-panel module-panel" id="strategy-wizard" data-module="onboarding">
         <div class="panel-head">
           <div>
             <p class="eyebrow">Step 2-7</p>
@@ -337,7 +355,7 @@
         </div>
       </section>
 
-      <section class="panel blueprint-panel" id="blueprint">
+      <section class="panel blueprint-panel module-panel" id="blueprint" data-module="blueprint">
         <div class="panel-head">
           <div>
             <p class="eyebrow">Step 8-9</p>
@@ -407,7 +425,7 @@
         </div>
       </section>
 
-      <section class="panel" id="runtime">
+      <section class="panel module-panel" id="runtime" data-module="runtime">
         <div class="panel-head">
           <div>
             <p class="eyebrow">Runtime</p>
@@ -473,7 +491,7 @@
         </div>
       </section>
 
-      <section class="panel memory-panel" id="advanced-memory">
+      <section class="panel memory-panel module-panel" id="advanced-memory" data-module="advanced-memory">
         <div class="panel-head">
           <div>
             <p class="eyebrow">Agent Knowledge Base</p>
@@ -648,7 +666,7 @@
         </div>
       </section>
 
-      <section class="panel diagnostics-panel" id="diagnostics">
+      <section class="panel diagnostics-panel module-panel" id="diagnostics" data-module="diagnostics">
         <div class="panel-head">
           <div>
             <p class="eyebrow">Test & Review Center</p>
@@ -712,7 +730,7 @@
               <li>发送按钮是否由 X 自身判定可用</li>
               <li>失败时是否暂停并写入日志</li>
             </ul>
-            <a class="btn-secondary log-link" href="#logs">查看行动记录</a>
+            <a class="btn-secondary log-link" href="#logs" data-open-module="logs">查看行动记录</a>
           </aside>
         </div>
 
@@ -731,7 +749,7 @@
         </div>
       </section>
 
-      <section class="panel logs-panel" id="logs">
+      <section class="panel logs-panel module-panel" id="logs" data-module="logs">
         <div class="panel-head">
           <div>
             <p class="eyebrow">Activity Log</p>
