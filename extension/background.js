@@ -449,6 +449,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // 保持通道异步开启
   } else if (request.action === "queueUpdated") {
     checkAndSetupAlarm();
+  } else if (request.action === "refreshXOfficialDraftCount") {
+    refreshXOfficialDraftCount(sendResponse);
+    return true;
   } else if (request.action === "xLoginDetected") {
     handleXLoginDetected();
     sendResponse({ success: true });
@@ -555,6 +558,41 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
   }
 });
+
+function refreshXOfficialDraftCount(sendResponse) {
+  chrome.storage.local.set({
+    xOfficialDraftStatus: 'reading',
+    xOfficialDraftError: ''
+  }, () => {
+    chrome.tabs.query({ url: ["*://*.x.com/*", "*://*.twitter.com/*"] }, (tabs) => {
+      const target = tabs.find(t => t.active) || tabs[0];
+      if (!target) {
+        const error = '未找到已打开的 X 页面';
+        chrome.storage.local.set({
+          xOfficialDraftStatus: 'failed',
+          xOfficialDraftError: error,
+          xOfficialDraftReadAt: Date.now()
+        });
+        sendResponse?.({ success: false, error });
+        return;
+      }
+
+      chrome.tabs.sendMessage(target.id, { action: 'readXOfficialDraftCount' }, (response) => {
+        if (chrome.runtime.lastError || !response?.success) {
+          const error = chrome.runtime.lastError?.message || response?.error || 'X 页面未响应草稿读取';
+          chrome.storage.local.set({
+            xOfficialDraftStatus: 'failed',
+            xOfficialDraftError: error,
+            xOfficialDraftReadAt: Date.now()
+          });
+          sendResponse?.({ success: false, error });
+          return;
+        }
+        sendResponse?.({ success: true, count: response.count });
+      });
+    });
+  });
+}
 
 // ==========================================
 // Configuration Check

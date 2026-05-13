@@ -1,10 +1,10 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const DRAFT_TARGET_COUNT = 20;
   const toggleBtn = document.getElementById('toggleBtn');
   const statusIndicator = document.getElementById('statusIndicator');
   const statusText = document.getElementById('statusText');
   const settingsBtn = document.getElementById('settingsBtn');
-  const queueCountSpan = document.getElementById('queueCount');
+  const xDraftCountSpan = document.getElementById('xDraftCount');
+  const refreshDraftCountBtn = document.getElementById('refreshDraftCountBtn');
   const strategySignal = document.getElementById('strategySignal');
   const genStatusSpan = document.getElementById('genStatus');
   const nextPostTimeSpan = document.getElementById('nextPostTime');
@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const stepQueue = document.getElementById('stepQueue');
 
   // Load initial state
-  chrome.storage.local.get(['isRunning', 'stats', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postDeliveryMode'], (result) => {
+  chrome.storage.local.get(['isRunning', 'stats', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postDeliveryMode', 'xOfficialDraftCount', 'xOfficialDraftStatus', 'xOfficialDraftError', 'xOfficialDraftReadAt'], (result) => {
     updateUI(result.isRunning, result.configErrors);
     updateDashboard(result);
   });
@@ -57,9 +57,22 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.runtime.openOptionsPage();
   });
 
+  refreshDraftCountBtn?.addEventListener('click', () => {
+    refreshDraftCountBtn.disabled = true;
+    xDraftCountSpan.textContent = '读取中...';
+    chrome.runtime.sendMessage({ action: 'refreshXOfficialDraftCount' }, (response) => {
+      refreshDraftCountBtn.disabled = false;
+      if (chrome.runtime.lastError || !response?.success) {
+        xDraftCountSpan.textContent = '读取失败';
+        return;
+      }
+      xDraftCountSpan.textContent = `${response.count} 个`;
+    });
+  });
+
   function updateDashboard(data) {
-    const queueLength = getValidDraftQueue(data.tweetQueue).length;
-    queueCountSpan.textContent = `${queueLength} / ${DRAFT_TARGET_COUNT}`;
+    xDraftCountSpan.textContent = formatXDraftStatus(data);
+    if (refreshDraftCountBtn) refreshDraftCountBtn.disabled = data.xOfficialDraftStatus === 'reading';
     setText('modeText', `${getModeLabel(data.onboardingStrategy?.automationMode)} · ${getDeliveryModeLabel(data.postDeliveryMode)}`);
     setText('tweetsProcessed', data.stats?.tweetsProcessed || 0);
     setText('repliesSent', data.stats?.repliesSent || 0);
@@ -83,14 +96,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const hasConfig = Boolean(data.apiKey && data.leadTarget);
     const persona = data.aiPersona || {};
     const hasPersona = Boolean(persona.targetUsers || persona.characteristics || persona.goals);
+    const hasOfficialDraftRead = data.xOfficialDraftStatus === 'success';
     setStepState(stepConfig, hasConfig, data.configErrors && data.configErrors.length > 0);
     setStepState(stepPersona, hasPersona, false);
-    setStepState(stepQueue, queueLength > 0, false);
+    setStepState(stepQueue, hasOfficialDraftRead, data.xOfficialDraftStatus === 'failed');
   }
 
   // Listen for updates from background
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    chrome.storage.local.get(['tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'isRunning', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postDeliveryMode', 'stats'], (result) => {
+    chrome.storage.local.get(['tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'configErrors', 'isRunning', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postDeliveryMode', 'stats', 'xOfficialDraftCount', 'xOfficialDraftStatus', 'xOfficialDraftError', 'xOfficialDraftReadAt'], (result) => {
        updateDashboard(result);
        updateUI(result.isRunning, result.configErrors);
     });
@@ -99,7 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Listen for storage changes
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === 'local') {
-      chrome.storage.local.get(['isRunning', 'configErrors', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postDeliveryMode', 'stats'], (result) => {
+      chrome.storage.local.get(['isRunning', 'configErrors', 'tweetQueue', 'accountBio', 'isGenerating', 'nextPostTime', 'apiKey', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'postDeliveryMode', 'stats', 'xOfficialDraftCount', 'xOfficialDraftStatus', 'xOfficialDraftError', 'xOfficialDraftReadAt'], (result) => {
         updateUI(result.isRunning, result.configErrors);
         updateDashboard(result);
       });
@@ -158,16 +172,6 @@ document.addEventListener('DOMContentLoaded', () => {
     return values.find(value => typeof value === 'string' && value.trim()) || '';
   }
 
-  function getValidDraftQueue(queue = []) {
-    if (!Array.isArray(queue)) return [];
-    return queue
-      .filter((item) => {
-        const text = typeof item === 'string' ? item : item?.text;
-        return typeof text === 'string' && text.trim().length > 0;
-      })
-      .slice(0, DRAFT_TARGET_COUNT);
-  }
-
   function compactText(text, limit) {
     const normalized = String(text || '').replace(/\s+/g, ' ').trim();
     return normalized.length > limit ? `${normalized.slice(0, limit)}...` : normalized;
@@ -224,6 +228,15 @@ document.addEventListener('DOMContentLoaded', () => {
       xNativeSchedule: 'X 定时'
     };
     return labels[mode] || labels.localQueue;
+  }
+
+  function formatXDraftStatus(data = {}) {
+    if (data.xOfficialDraftStatus === 'reading') return '读取中...';
+    if (data.xOfficialDraftStatus === 'failed') return '读取失败';
+    if (data.xOfficialDraftStatus === 'success' && Number.isFinite(Number(data.xOfficialDraftCount))) {
+      return `${Number(data.xOfficialDraftCount)} 个`;
+    }
+    return '未读取';
   }
 
   function setText(id, text) {

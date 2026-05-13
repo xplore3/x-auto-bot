@@ -7,7 +7,6 @@ console.log("X Auto Bot: Scraper loaded on X.com");
 // Global cooldown to prevent hitting Gemini API rate limits (15 requests/min)
 const REPLY_COOLDOWN_MS = 300000; // 5 minutes
 const REPLY_ATTEMPT_LOCK_MS = 60000; // short lock while the automator tries to send
-const DRAFT_TARGET_COUNT = 20;
 const MAX_LOGS = 50;
 
 // ==========================================
@@ -687,16 +686,6 @@ function getWidgetConfigErrors(state) {
   return errors;
 }
 
-function getValidDraftQueue(queue = []) {
-  if (!Array.isArray(queue)) return [];
-  return queue
-    .filter((item) => {
-      const text = typeof item === 'string' ? item : item?.text;
-      return typeof text === 'string' && text.trim().length > 0;
-    })
-    .slice(0, DRAFT_TARGET_COUNT);
-}
-
 function refreshBotStateFromStorage() {
   if (!chrome.runtime?.id) return;
   chrome.storage.local.get(null, (res) => {
@@ -721,7 +710,6 @@ function renderWidget() {
 
   const now = Date.now();
   const isPersonaEmpty = !botState.aiPersona || (!botState.aiPersona.targetUsers && !botState.aiPersona.characteristics && !botState.aiPersona.goals);
-  const qLen = getValidDraftQueue(botState.tweetQueue).length;
   const automationMode = getAutomationMode(botState);
   const replySuggestionEnabled = shouldGenerateReplySuggestion(automationMode);
   const autoPublishEnabled = automationMode === 'auto';
@@ -800,6 +788,14 @@ function renderWidget() {
   const timeStr = new Date().toLocaleTimeString('en-US', { hour12: false });
   const nextPostStr = botState.nextPostTime ? botState.nextPostTime : '待计算';
   const logoUrl = chrome.runtime.getURL('assets/icons/icon-48.png');
+  const xDraftStatus = (() => {
+    if (botState.xOfficialDraftStatus === 'reading') return '读取中';
+    if (botState.xOfficialDraftStatus === 'failed') return '读取失败';
+    if (botState.xOfficialDraftStatus === 'success' && Number.isFinite(Number(botState.xOfficialDraftCount))) {
+      return `${Number(botState.xOfficialDraftCount)} 个`;
+    }
+    return '未读取';
+  })();
 
   const logs = botState.logs || [];
   const recentLogs = logs.slice(-12);
@@ -1130,7 +1126,7 @@ function renderWidget() {
       ${milestone(botState.accountBio ? 'done' : (profileFailed ? 'failed' : 'pending'), '读取主页简介')}
       ${milestone(!isPersonaEmpty ? 'done' : 'pending', '人设与目标用户')}
       ${milestone(botState.competitorReport ? 'done' : 'pending', '竞品与爆款框架')}
-      ${milestone(qLen >= DRAFT_TARGET_COUNT ? 'done' : 'pending', 'Agent 内容队列', `${qLen}/${DRAFT_TARGET_COUNT}`)}
+      ${milestone(botState.xOfficialDraftStatus === 'success' ? 'done' : (botState.xOfficialDraftStatus === 'failed' ? 'failed' : 'pending'), 'X 官方草稿', xDraftStatus)}
     </div>
 
     <div class="x-bot-next-post">

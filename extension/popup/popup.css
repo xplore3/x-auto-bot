@@ -191,6 +191,29 @@ h1 {
   word-break: break-word;
 }
 
+.metric-action {
+  margin-top: 7px;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgba(15, 139, 214, 0.28);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--primary);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.metric-action:hover {
+  background: #e8f3fb;
+}
+
+.metric-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 #nextPostTime {
   font-size: 12px;
 }

@@ -34,8 +34,9 @@
       </div>
       <div class="metric-grid">
         <div class="metric">
-          <span class="metric-label">Agent 内容队列</span>
-          <strong id="queueCount">0 / 20</strong>
+          <span class="metric-label">X 官方草稿</span>
+          <strong id="xDraftCount">未读取</strong>
+          <button id="refreshDraftCountBtn" class="metric-action" type="button">读取</button>
         </div>
         <div class="metric">
           <span class="metric-label">下次交付</span>
@@ -81,7 +82,7 @@
         <span class="step-dot"></span>
         <div>
           <strong>内容准备</strong>
-          <p>生成 Agent 内容队列，并按交付方式发布或写入 X 定时器</p>
+          <p>生成内容后写入 X 官方草稿或定时器；不再用本地队列冒充草稿数</p>
         </div>
       </div>
     </section>

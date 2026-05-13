@@ -88,10 +88,17 @@ function getEditorText(element) {
 
 function findTweetEditor(scope = document) {
   const root = scope || document;
-  return root.querySelector('[data-testid="tweetTextarea_0"][role="textbox"][contenteditable="true"]')
-    || root.querySelector('[data-testid="tweetTextarea_0"] [role="textbox"][contenteditable="true"]')
-    || root.querySelector('[role="textbox"][contenteditable="true"][aria-label]')
-    || root.querySelector('div[data-testid="tweetTextarea_0"]');
+  const selectors = [
+    '[data-testid="tweetTextarea_0"] [contenteditable="true"]',
+    '[data-testid="tweetTextarea_0"][contenteditable="true"]',
+    '[role="textbox"][contenteditable="true"]'
+  ];
+  const candidates = [...new Set(selectors.flatMap(selector => Array.from(root.querySelectorAll(selector))))]
+    .filter(element => element.isContentEditable && isVisibleElement(element));
+  return candidates.find((element) => {
+    const label = `${element.getAttribute('aria-label') || ''} ${element.closest('[data-testid="tweetTextarea_0"]') ? 'tweetTextarea' : ''}`;
+    return /tweet|post|reply|回复|发帖|发布|tweetTextarea/i.test(label);
+  }) || candidates[0] || null;
 }
 
 function findActiveDialog() {
@@ -127,6 +134,69 @@ function findScheduleButton(scope = document) {
     || root.querySelector('button[aria-label*="定时"]')
     || root.querySelector('button[aria-label*="安排"]')
     || findButtonByText(root, [/schedule/i, /定时|安排|日程/]);
+}
+
+function findDraftsButton(scope = document) {
+  const root = scope || document;
+  return root.querySelector('[data-testid="draftsButton"]')
+    || root.querySelector('a[href*="draft"]')
+    || root.querySelector('button[aria-label*="Draft"]')
+    || root.querySelector('button[aria-label*="草稿"]')
+    || findButtonByText(root, [/drafts?/i, /草稿/]);
+}
+
+function findComposeButton(scope = document) {
+  const root = scope || document;
+  return root.querySelector('a[data-testid="SideNav_NewTweet_Button"]')
+    || root.querySelector('a[href="/compose/post"]')
+    || root.querySelector('[data-testid="FloatingActionButtons_Tweet_Button"]')
+    || findButtonByText(root, [/^post$/i, /^tweet$/i, /发帖|发布/]);
+}
+
+function parseDraftCountFromText(text = '') {
+  const patterns = [
+    /Drafts?\s*\(?\s*(\d+)\s*\)?/i,
+    /(\d+)\s+Drafts?/i,
+    /草稿\s*\(?\s*(\d+)\s*\)?/,
+    /(\d+)\s*个?草稿/
+  ];
+  for (const pattern of patterns) {
+    const match = String(text || '').match(pattern);
+    if (match?.[1]) return Number(match[1]);
+  }
+  return null;
+}
+
+function countDraftRows(scope = document) {
+  const textCount = parseDraftCountFromText(scope.innerText || '');
+  if (Number.isFinite(textCount)) return textCount;
+
+  const rows = Array.from(scope.querySelectorAll('[data-testid="cellInnerDiv"], [role="listitem"], article, div[role="button"]'))
+    .filter(isVisibleElement)
+    .filter((row) => {
+      const text = (row.innerText || '').trim();
+      if (text.length < 4) return false;
+      if (/Drafts?|草稿|Close|关闭|Back|返回|Done|完成/i.test(text) && text.length < 18) return false;
+      if (/Post|Tweet|发布|发帖|Schedule|定时/i.test(text) && text.length < 18) return false;
+      return true;
+    });
+  return rows.length;
+}
+
+async function closeTopDialogIfSafe() {
+  const dialog = findActiveDialog();
+  if (!dialog) return;
+  const editor = findTweetEditor(dialog);
+  if (editor && getEditorText(editor)) return;
+  const closeButton = dialog.querySelector('[data-testid="app-bar-close"]')
+    || dialog.querySelector('button[aria-label*="Close"]')
+    || dialog.querySelector('button[aria-label*="关闭"]')
+    || dialog.querySelector('button[aria-label*="Back"]')
+    || dialog.querySelector('button[aria-label*="返回"]');
+  if (closeButton) {
+    simulateRealClick(closeButton);
+    await sleep(500);
+  }
 }
 
 function getButtonDisabledReason(button) {
@@ -260,12 +330,20 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
         sendBtn = await waitForEnabledButton(() => {
           const d = findActiveDialog();
           return d ? findSendButton(d) : findSendButton(document);
-        }, 10000);
+        }, 6000);
+        if (!sendBtn && getEditorText(draftEditor) === normalizeText(replyText)) {
+          addLog('warn', '回复按钮仍未启用，尝试重新同步输入状态');
+          await nudgeEditorState(draftEditor);
+          sendBtn = await waitForEnabledButton(() => {
+            const d = findActiveDialog();
+            return d ? findSendButton(d) : findSendButton(document);
+          }, 9000);
+        }
         
         if (!sendBtn) {
           consecutiveFailures++;
           const currentButton = dialog ? findSendButton(dialog) : findSendButton(document);
-          const reason = `发送按钮未自然启用，取消本次回复。文本长度 ${normalizeText(replyText).length}，按钮状态 ${getButtonDisabledReason(currentButton)} (连续失败 ${consecutiveFailures} 次)`;
+          const reason = `发送按钮未自然启用，取消本次回复。文本长度 ${normalizeText(replyText).length}，输入框文本「${getEditorText(draftEditor).substring(0, 40)}」，按钮状态 ${getButtonDisabledReason(currentButton)} (连续失败 ${consecutiveFailures} 次)`;
           addLog('error', reason);
           notifyReplyFailed(reason);
           checkAndPause();
@@ -316,6 +394,7 @@ window.addEventListener('xAutoBot_ReadyToReply', async (e) => {
 async function simulateTyping(element, text) {
   const normalized = normalizeText(text);
   const methods = [
+    insertByKeyboardEvents,
     insertByExecCommand,
     insertByPasteEvent,
     insertByDirectInput
@@ -326,6 +405,7 @@ async function simulateTyping(element, text) {
       await method(element, normalized);
       await sleep(650);
       if (getEditorText(element) === normalized) {
+        await nudgeEditorState(element);
         await sleep(1200);
         return;
       }
@@ -337,26 +417,74 @@ async function simulateTyping(element, text) {
   await sleep(1200);
 }
 
+function setEditorSelection(element, selectAll = false) {
+  if (!element) return;
+  element.focus();
+  if (!element.isContentEditable) {
+    if (selectAll) {
+      element.setSelectionRange?.(0, element.value?.length || 0);
+    }
+    return;
+  }
+  const selection = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  if (!selectAll) range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
 async function prepareEditor(element) {
   element.focus();
   element.click();
   await sleep(120);
+  setEditorSelection(element, true);
   try {
     document.execCommand('selectAll', false, null);
     document.execCommand('delete', false, null);
   } catch (e) {
     // Some pages block execCommand; fallback methods below still run.
   }
-  if (element.isContentEditable) {
+  if (element.isContentEditable && getEditorText(element)) {
     element.textContent = '';
-  } else {
+  } else if (!element.isContentEditable) {
     element.value = '';
   }
   element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }));
+  setEditorSelection(element, false);
+}
+
+async function insertByKeyboardEvents(element, text) {
+  await prepareEditor(element);
+  for (const char of Array.from(text)) {
+    const keyEventInit = {
+      bubbles: true,
+      cancelable: true,
+      key: char,
+      code: char === '\n' ? 'Enter' : undefined
+    };
+    element.dispatchEvent(new KeyboardEvent('keydown', keyEventInit));
+    element.dispatchEvent(new InputEvent('beforeinput', {
+      bubbles: true,
+      cancelable: true,
+      inputType: char === '\n' ? 'insertLineBreak' : 'insertText',
+      data: char === '\n' ? null : char
+    }));
+    document.execCommand('insertText', false, char);
+    element.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      inputType: char === '\n' ? 'insertLineBreak' : 'insertText',
+      data: char === '\n' ? null : char
+    }));
+    element.dispatchEvent(new KeyboardEvent('keyup', keyEventInit));
+    await sleep(8);
+  }
+  element.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 async function insertByExecCommand(element, text) {
   await prepareEditor(element);
+  setEditorSelection(element, false);
   document.execCommand('insertText', false, text);
   element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
   element.dispatchEvent(new Event('change', { bubbles: true }));
@@ -364,6 +492,7 @@ async function insertByExecCommand(element, text) {
 
 async function insertByPasteEvent(element, text) {
   await prepareEditor(element);
+  setEditorSelection(element, false);
   const data = new DataTransfer();
   data.setData('text/plain', text);
   const pasteEvent = new ClipboardEvent('paste', {
@@ -389,6 +518,23 @@ async function insertByDirectInput(element, text) {
   element.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, inputType: 'insertText', data: text }));
   element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
   element.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+async function nudgeEditorState(element) {
+  if (!element || !element.isContentEditable) return;
+  setEditorSelection(element, false);
+  const before = getEditorText(element);
+  try {
+    document.execCommand('insertText', false, ' ');
+    element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ' ' }));
+    document.execCommand('delete', false, null);
+    element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }));
+  } catch (e) {
+    // Best-effort nudge only.
+  }
+  if (getEditorText(element) !== before) {
+    await insertByExecCommand(element, before);
+  }
 }
 
 function simulateRealClick(element) {
@@ -562,6 +708,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     addLog('info', '收到后台发推指令');
     handlePendingPost();
     sendResponse({ success: true });
+  } else if (request.action === "readXOfficialDraftCount") {
+    readXOfficialDraftCount()
+      .then(count => sendResponse({ success: true, count }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
   }
 });
 
@@ -696,6 +847,74 @@ async function handlePendingPost() {
       isAutomatorBusy = false;
     }
   });
+}
+
+async function readXOfficialDraftCount() {
+  if (isAutomatorBusy) throw new Error('Agent 正在执行发布/回复，稍后再读取 X 草稿');
+  if (isLoggedOutOrBlocked()) throw new Error('X 页面未登录或正在验证，无法读取官方草稿');
+
+  isAutomatorBusy = true;
+  chrome.storage.local.set({
+    xOfficialDraftStatus: 'reading',
+    xOfficialDraftError: ''
+  });
+
+  try {
+    const existingDraftButton = findDraftsButton(document);
+    if (!existingDraftButton) {
+      const composeBtn = findComposeButton(document);
+      if (composeBtn) {
+        simulateRealClick(composeBtn);
+      } else {
+        window.location.assign('https://x.com/compose/post');
+      }
+      await sleep(1800);
+    }
+
+    const dialog = await waitForElement(findActiveDialog, 8000);
+    const draftButton = findDraftsButton(dialog || document);
+    if (!draftButton) {
+      await closeTopDialogIfSafe();
+      chrome.storage.local.set({
+        xOfficialDraftCount: 0,
+        xOfficialDraftStatus: 'success',
+        xOfficialDraftError: '',
+        xOfficialDraftReadAt: Date.now()
+      });
+      addLog('info', '未发现 X Drafts 入口，按 0 个官方草稿处理');
+      return 0;
+    }
+
+    const buttonCount = parseDraftCountFromText(`${draftButton.innerText || ''} ${draftButton.getAttribute('aria-label') || ''}`);
+    simulateRealClick(draftButton);
+    await sleep(1500);
+
+    const draftDialog = await waitForElement(() => {
+      const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+      return dialogs.find(item => /Drafts?|草稿/i.test(item.innerText || '')) || dialogs[0];
+    }, 8000);
+
+    const count = Number.isFinite(buttonCount) ? buttonCount : countDraftRows(draftDialog || document);
+    chrome.storage.local.set({
+      xOfficialDraftCount: count,
+      xOfficialDraftStatus: 'success',
+      xOfficialDraftError: '',
+      xOfficialDraftReadAt: Date.now()
+    });
+    addLog('success', `已读取 X 官方草稿数量：${count}`);
+    await closeTopDialogIfSafe();
+    return count;
+  } catch (error) {
+    chrome.storage.local.set({
+      xOfficialDraftStatus: 'failed',
+      xOfficialDraftError: error.message,
+      xOfficialDraftReadAt: Date.now()
+    });
+    addLog('error', `读取 X 官方草稿失败: ${error.message}`);
+    throw error;
+  } finally {
+    isAutomatorBusy = false;
+  }
 }
 
 })();
