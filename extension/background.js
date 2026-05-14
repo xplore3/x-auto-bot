@@ -218,6 +218,19 @@ function formatLeadAsset(strategy = {}) {
   return '【评论引流资产】暂不设置产品或资料入口。评论目标是高质量互动、主页访问和关注沉淀。';
 }
 
+function formatReplyOpportunity(opportunity = {}) {
+  const score = Number(opportunity.score);
+  const reasons = Array.isArray(opportunity.reasons) ? opportunity.reasons.join('、') : '';
+  const age = Number.isFinite(Number(opportunity.ageMinutes)) ? `${Number(opportunity.ageMinutes)} 分钟前` : '';
+  const lines = [];
+  if (Number.isFinite(score)) lines.push(`互动机会分：${score}`);
+  if (reasons) lines.push(`入选原因：${reasons}`);
+  if (age) lines.push(`发布时间：${age}`);
+  if (opportunity.isTargetAuthor) lines.push('作者属于优先互动账号。');
+  if (opportunity.topicRelevant) lines.push('内容主题与账号策略相关。');
+  return lines.length > 0 ? `【本次互动机会判断】\n${lines.join('\n')}` : '';
+}
+
 const LOW_VALUE_REPLY_PATTERNS = [
   /^(说得对|确实|学习了|收藏了|mark|马克|很有启发|有道理|太真实了)[。！!]*$/i,
   /干货满满|值得关注|受教了|感谢分享|很棒的分享/,
@@ -657,7 +670,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "generateReply") {
     addLog('info', '收到回复生成请求，调用 AI 接口...');
     // 调用大模型 API 生成回复
-    generateAIResponse(request.tweetContent || request.tweetText || '')
+    generateAIResponse(request.tweetContent || request.tweetText || '', request)
       .then(replyText => {
         addLog('success', 'AI 回复生成完成');
         sendResponse({ success: true, replyText, reply: replyText });
@@ -1450,7 +1463,7 @@ function handlePostCompleted(source) {
   });
 }
 
-async function generateAIResponse(tweetContent) {
+async function generateAIResponse(tweetContent, replyContext = {}) {
   return new Promise((resolve, reject) => {
     chrome.storage.local.get(['apiKey', 'apiProvider', 'aiModel', 'promptTemplate', 'leadTarget', 'aiPersona', 'agentMemory', 'onboardingStrategy', 'accountBio'], async (config) => {
       const errors = getConfigErrors(config);
@@ -1466,7 +1479,7 @@ async function generateAIResponse(tweetContent) {
         accountBio: config.accountBio,
         leadTarget: config.leadTarget
       });
-      const personaContext = `\n【你的账号人设与特征】：${config.aiPersona?.characteristics || '未填写'}\n【你的核心引流目标】：${config.aiPersona?.goals || config.leadTarget}\n${formatLeadAsset(config.onboardingStrategy)}\n【你的长期记忆】\n${formatAgentMemory(config.agentMemory)}\n${formatGrowthPlaybook(playbook)}\n请严格符合上述人设、观点边界、内容模板和互动策略进行回复。\n`;
+      const personaContext = `\n【你的账号人设与特征】：${config.aiPersona?.characteristics || '未填写'}\n【你的核心引流目标】：${config.aiPersona?.goals || config.leadTarget}\n${formatLeadAsset(config.onboardingStrategy)}\n${formatReplyOpportunity(replyContext.replyOpportunity)}\n【你的长期记忆】\n${formatAgentMemory(config.agentMemory)}\n${formatGrowthPlaybook(playbook)}\n请严格符合上述人设、观点边界、内容模板和互动策略进行回复。\n`;
       
       const prompt = `你是一个严格的 X 评论筛选与回复 Agent。
 
@@ -1480,12 +1493,15 @@ async function generateAIResponse(tweetContent) {
 - 不超过 90 个中文字符，或目标语言下同等长度
 - 先补充观点/经验/反问，不要上来推销
 - 必须包含一个具体信息增量：判断标准、反例、边界、场景、动作步骤或可验证观察
+- 把每条回复当成一条可以独立成立的 mini-content；如果单独看没有价值，返回 SKIP
+- 回复目标不是“抢注意力”，而是让原推变得更完整：补上下文、延展观点、压缩重点或加入真实经验
 - 回复结构优先选一种：
-  1. 补充边界：这事成立，但只在 xx 场景成立
-  2. 给判断标准：我会先看 xx，再看 xx
-  3. 加反常识：问题不在 xx，而在 xx
-  4. 给下一步：可以先做 xx，再决定是否投入
+  1. Missing angle：说出原推没讲但读者需要的关键边界
+  2. Sharpen：把原推压缩成更锋利的一句话
+  3. Real experience：补一个亲历/观察/可验证的实践经验
+  4. Next step：给一个下一步动作或判断标准
 - 不要写“说得对/学习了/很有启发/值得关注/未来可期/干货满满”
+- 不要 hijack 原帖，不要把话题强行转到自己产品
 - 不要堆标签；默认不加 hashtag
 - 不要说“看我主页/私信我/翻我主页”，除非原文明确在求资源
 - 不要承诺收益，不要编造事实，不要攻击个人

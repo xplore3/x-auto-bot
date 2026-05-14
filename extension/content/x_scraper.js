@@ -8,6 +8,7 @@ console.log("X Auto Bot: Scraper loaded on X.com");
 const REPLY_COOLDOWN_MS = 300000; // 5 minutes
 const REPLY_ATTEMPT_LOCK_MS = 60000; // short lock while the automator tries to send
 const MAX_LOGS = 50;
+const MIN_REPLY_OPPORTUNITY_SCORE = 58;
 
 // ==========================================
 // Logging System
@@ -347,6 +348,30 @@ function getTweetText(tweetNode) {
   return '';
 }
 
+function getTweetCreatedAt(tweetNode) {
+  const datetime = tweetNode.querySelector('time')?.getAttribute('datetime') || '';
+  const ts = Date.parse(datetime);
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function getTweetAgeMinutes(tweetNode) {
+  const createdAt = getTweetCreatedAt(tweetNode);
+  if (!createdAt) return null;
+  return Math.max(0, Math.floor((Date.now() - createdAt) / 60000));
+}
+
+function getOwnHandle() {
+  return (getProfilePathFromNav() || getCurrentProfilePath()).replace('/', '').toLowerCase();
+}
+
+function isPromotedTweet(tweetNode) {
+  return /Promoted|Ad\b|广告|推广/.test(tweetNode?.innerText || '');
+}
+
+function isNestedReplyTweet(tweetNode) {
+  return /Replying to|回复给|正在回复/.test(tweetNode?.innerText || '');
+}
+
 function isLowValueReplyTarget(text = '') {
   const normalized = String(text || '').toLowerCase().replace(/\s+/g, ' ').trim();
   if (!normalized) return true;
@@ -450,6 +475,98 @@ function hasRelevantTopic(text = '', state = {}) {
   return collectTopicKeywords(state).some(keyword => normalized.includes(keyword));
 }
 
+function hasStandaloneReplyPotential(text = '') {
+  const normalized = String(text || '').toLowerCase();
+  return [
+    /不是.*而是|not .* but|really about|本质|关键|核心|真正/,
+    /because|why|how|lesson|mistake|framework|playbook|workflow|case|example/,
+    /为什么|如何|怎么|经验|教训|框架|路径|清单|案例|复盘|步骤|判断|标准|边界/,
+    /\d+[.)、]|[一二三四五六七八九十]个/
+  ].some(pattern => pattern.test(normalized));
+}
+
+function scoreFreshness(ageMinutes) {
+  if (ageMinutes === null) return { score: 4, label: '未知发布时间' };
+  if (ageMinutes <= 30) return { score: 24, label: '30分钟内' };
+  if (ageMinutes <= 120) return { score: 20, label: '2小时内' };
+  if (ageMinutes <= 360) return { score: 14, label: '6小时内' };
+  if (ageMinutes <= 1440) return { score: 6, label: '24小时内' };
+  if (ageMinutes <= 2880) return { score: -8, label: '24小时以上' };
+  return { score: -24, label: '48小时以上' };
+}
+
+function getReplyOpportunity(article, author, text, state = {}) {
+  const targetHandles = collectTargetHandles(state);
+  const authorHandle = String(author || '').toLowerCase();
+  const isTargetAuthor = targetHandles.includes(authorHandle);
+  const topicRelevant = hasRelevantTopic(text, state);
+  const ageMinutes = getTweetAgeMinutes(article);
+  const freshness = scoreFreshness(ageMinutes);
+  const ownHandle = getOwnHandle();
+
+  let score = 0;
+  const reasons = [];
+
+  if (ownHandle && authorHandle === ownHandle) {
+    return { score: -999, reasons: ['自己的推文'], ageMinutes, isTargetAuthor, topicRelevant };
+  }
+  if (isPromotedTweet(article)) {
+    return { score: -999, reasons: ['广告/推广内容'], ageMinutes, isTargetAuthor, topicRelevant };
+  }
+  if (isNestedReplyTweet(article) && !isTargetAuthor) {
+    score -= 12;
+    reasons.push('非目标账号的二级回复');
+  }
+
+  if (isTargetAuthor) {
+    score += 36;
+    reasons.push('优先互动账号');
+  } else if (targetHandles.length > 0) {
+    score -= 8;
+    reasons.push('非目标账号');
+  }
+
+  if (topicRelevant) {
+    score += 22;
+    reasons.push('主题相关');
+  }
+
+  score += freshness.score;
+  reasons.push(freshness.label);
+
+  const visualChars = Array.from(text).length;
+  if (visualChars >= 80 && visualChars <= 520) {
+    score += 12;
+    reasons.push('信息量适中');
+  } else if (visualChars > 520) {
+    score -= 8;
+    reasons.push('原推过长');
+  }
+
+  if (hasStandaloneReplyPotential(text)) {
+    score += 18;
+    reasons.push('适合补充观点');
+  }
+
+  if (/[?？]|\bhow\b|\bwhy\b|如何|怎么|为什么/.test(text)) {
+    score += 8;
+    reasons.push('可回答问题');
+  }
+
+  if (/launch|released|introducing|发布|上线|刚做了|复盘|case study|案例|数据|增长|转化|用户/.test(text.toLowerCase())) {
+    score += 8;
+    reasons.push('适合补充经验/判断');
+  }
+
+  return {
+    score,
+    reasons,
+    ageMinutes,
+    isTargetAuthor,
+    topicRelevant
+  };
+}
+
 function getReplySkipReason(author, text, state = {}) {
   if (isSensitiveReplyTarget(text)) return '涉及政治/战争等敏感话题';
   const targetHandles = collectTargetHandles(state);
@@ -550,7 +667,8 @@ function scrapeTweets() {
     
     const articles = document.querySelectorAll('article[data-testid="tweet"]');
     if (articles.length === 0) return;
-    
+
+    const candidates = [];
     for (const article of articles) {
       const author = getTweetAuthor(article);
       const text = getTweetText(article);
@@ -559,87 +677,105 @@ function scrapeTweets() {
       if (!text || text.length < 10) continue;
       const tweetId = getTweetBotId(article, author, text);
       if (processedTweetIds.has(tweetId)) continue;
-      rememberProcessedTweet(tweetId);
 
       if (isLowValueReplyTarget(text)) {
+        rememberProcessedTweet(tweetId);
         addLog('info', `跳过低价值互动目标 @${author}: ${text.substring(0, 50)}...`);
         continue;
       }
       const skipReason = getReplySkipReason(author, text, result);
       if (skipReason) {
+        rememberProcessedTweet(tweetId);
         addLog('info', `跳过 @${author}: ${skipReason}。${text.substring(0, 50)}...`);
         continue;
       }
       if (shouldSendReply(automationMode) && !tweetStatus.id) {
+        rememberProcessedTweet(tweetId);
         addLog('warn', `跳过 @${author}: 未读取到推文 status id，无法走官方 intent 回复。${text.substring(0, 50)}...`);
         continue;
       }
 
-      addLog('info', `发现推文 @${author}: ${text.substring(0, 50)}...`);
-      incrementProcessedTweets();
-      
-      isReplying = true;
-      chrome.storage.local.set({ isGeneratingReply: true });
-      
-      chrome.runtime.sendMessage({
-        action: 'generateReply',
-        tweetText: text,
-        tweetContent: text,
-        tweetAuthor: author,
-        tweetElementId: tweetId,
-        tweetStatusHref: tweetStatus.href,
-        tweetStatusId: tweetStatus.id
-      }, (response) => {
-        isReplying = false;
-        chrome.storage.local.set({ isGeneratingReply: false });
-        if (chrome.runtime.lastError) {
-          addLog('error', '生成回复失败: ' + chrome.runtime.lastError.message);
-          return;
-        }
-        if (response && response.error) {
-          addLog('error', 'AI 生成回复失败: ' + response.error);
-          if (response.isApiCooldown) {
-            apiCooldownUntil = Date.now() + 60000;
-            chrome.storage.local.set({ apiCooldownUntil });
-          }
-          return;
-        }
-        const replyText = response ? (response.replyText || response.reply) : '';
-        if (replyText) {
-          const willSend = shouldSendReply(automationMode);
-          twitterCooldownUntil = Date.now() + (willSend ? REPLY_ATTEMPT_LOCK_MS : REPLY_COOLDOWN_MS);
-          chrome.storage.local.set({
-            twitterCooldownUntil,
-            lastReplySuggestion: {
-              tweetAuthor: author,
-              tweetContent: text,
-              replyText,
-              mode: automationMode,
-              time: Date.now()
-            }
-          });
-          addLog('success', willSend
-            ? `已生成回复 @${author}: ${replyText.substring(0, 40)}...`
-            : `影子回复建议 @${author}: ${replyText.substring(0, 40)}...`);
-          
-          if (willSend) {
-            // Dispatch event for automator
-            window.dispatchEvent(new CustomEvent('xAutoBot_ReadyToReply', {
-              detail: {
-                tweetElementId: tweetId,
-                replyText,
-                tweetAuthor: author,
-                tweetContent: text,
-                tweetStatusHref: tweetStatus.href,
-                tweetStatusId: tweetStatus.id
-              }
-            }));
-          }
-        }
-      });
-      
-      break; // Only process one tweet per cycle
+      const opportunity = getReplyOpportunity(article, author, text, result);
+      if (opportunity.score < MIN_REPLY_OPPORTUNITY_SCORE) {
+        rememberProcessedTweet(tweetId);
+        addLog('info', `跳过 @${author}: 互动机会分 ${opportunity.score} 低于 ${MIN_REPLY_OPPORTUNITY_SCORE}（${opportunity.reasons.join('、')}）`);
+        continue;
+      }
+
+      candidates.push({ article, author, text, tweetStatus, tweetId, opportunity });
     }
+
+    if (candidates.length === 0) return;
+
+    candidates.sort((a, b) => b.opportunity.score - a.opportunity.score);
+    const selected = candidates[0];
+    rememberProcessedTweet(selected.tweetId);
+
+    addLog('info', `选择互动 @${selected.author}: 机会分 ${selected.opportunity.score}（${selected.opportunity.reasons.join('、')}）`);
+    incrementProcessedTweets();
+
+    isReplying = true;
+    chrome.storage.local.set({ isGeneratingReply: true });
+
+    chrome.runtime.sendMessage({
+      action: 'generateReply',
+      tweetText: selected.text,
+      tweetContent: selected.text,
+      tweetAuthor: selected.author,
+      tweetElementId: selected.tweetId,
+      tweetStatusHref: selected.tweetStatus.href,
+      tweetStatusId: selected.tweetStatus.id,
+      replyOpportunity: selected.opportunity
+    }, (response) => {
+      isReplying = false;
+      chrome.storage.local.set({ isGeneratingReply: false });
+      if (chrome.runtime.lastError) {
+        addLog('error', '生成回复失败: ' + chrome.runtime.lastError.message);
+        return;
+      }
+      if (response && response.error) {
+        addLog('error', 'AI 生成回复失败: ' + response.error);
+        if (response.isApiCooldown) {
+          apiCooldownUntil = Date.now() + 60000;
+          chrome.storage.local.set({ apiCooldownUntil });
+        }
+        return;
+      }
+      const replyText = response ? (response.replyText || response.reply) : '';
+      if (replyText) {
+        const willSend = shouldSendReply(automationMode);
+        twitterCooldownUntil = Date.now() + (willSend ? REPLY_ATTEMPT_LOCK_MS : REPLY_COOLDOWN_MS);
+        chrome.storage.local.set({
+          twitterCooldownUntil,
+          lastReplySuggestion: {
+            tweetAuthor: selected.author,
+            tweetContent: selected.text,
+            replyText,
+            mode: automationMode,
+            opportunityScore: selected.opportunity.score,
+            opportunityReasons: selected.opportunity.reasons,
+            time: Date.now()
+          }
+        });
+        addLog('success', willSend
+          ? `已生成回复 @${selected.author}: ${replyText.substring(0, 40)}...`
+          : `影子回复建议 @${selected.author}: ${replyText.substring(0, 40)}...`);
+
+        if (willSend) {
+          // Dispatch event for automator
+          window.dispatchEvent(new CustomEvent('xAutoBot_ReadyToReply', {
+            detail: {
+              tweetElementId: selected.tweetId,
+              replyText,
+              tweetAuthor: selected.author,
+              tweetContent: selected.text,
+              tweetStatusHref: selected.tweetStatus.href,
+              tweetStatusId: selected.tweetStatus.id
+            }
+          }));
+        }
+      }
+    });
   });
 }
 
@@ -703,6 +839,9 @@ function formatLogTime(ts) {
 function isResultLog(log = {}) {
   const message = String(log.message || '');
   if (/跳过推文抓取|不启动自动滚动|停止自动滚动|跳过发推调度|跳过本次发推|跳过发推|跳过 intent 回复|机器人已停止|用户手动恢复/.test(message)) {
+    return false;
+  }
+  if (/跳过低价值互动目标|互动机会分 .*低于|主题与账号策略不相关|非优先互动账号|未读取到推文 status id/.test(message)) {
     return false;
   }
   const resultPatterns = [

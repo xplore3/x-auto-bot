@@ -775,7 +775,16 @@ function buildVoiceRules(strategy) {
 
 function buildReplyStrategy(strategy) {
   const audience = getAudienceLabels(strategy).join('、') || '目标用户';
-  return `优先回复 ${audience} 关注的话题。结构：先补充一个具体判断，再给一个经验/例子/反问；只在上下文自然相关时带行动入口，不硬广，不刷屏。\n${describeLeadAsset(strategy)}`;
+  return `优先回复 5-10 个赛道核心创作者和 ${audience} 正在讨论的话题。不要为了被看见而回复，只回复能让原帖变得更完整的内容。
+
+高价值回复三种结构：
+1. 补缺失角度：说出原帖没讲但读者需要的边界。
+2. 压缩观点：把原帖进一步提炼成更锋利的一句话。
+3. 补真实经验：提供观察、案例、试错或判断标准。
+
+每条回复都要能单独成立为 mini-content；如果只剩“说得对/学习了/值得关注”，宁愿跳过。
+只在上下文自然相关时带行动入口，不硬广，不刷屏，不 hijack 原帖。
+${describeLeadAsset(strategy)}`;
 }
 
 function buildPromptTemplate(strategy) {
