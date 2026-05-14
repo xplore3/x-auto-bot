@@ -307,8 +307,9 @@ async function closeOpenComposerBeforeNavigation(reason = '页面跳转') {
 }
 
 async function safeNavigateTo(url, reason = '页面跳转', options = {}) {
-  if (!url) return false;
-  if (window.location.href === url) return true;
+  const result = (success, extra = {}) => options.returnDetails ? { success, ...extra } : success;
+  if (!url) return result(false);
+  if (window.location.href === url) return result(true, { openedCleanTab: false, samePage: true });
   const closed = await closeOpenComposerBeforeNavigation(reason);
   if (!closed) {
     if (options.openCleanTabOnBlocked) {
@@ -318,14 +319,14 @@ async function safeNavigateTo(url, reason = '页面跳转', options = {}) {
       }));
       if (response?.success) {
         addLog('warn', `${reason} 前无法自动关闭当前未保存编辑器，已改用新的干净 X 标签页继续`);
-        return true;
+        return result(true, { openedCleanTab: true, tabId: response.tabId || null });
       }
     }
     pauseAutomation(`${reason} 前无法自动关闭未保存编辑器，已暂停以避免浏览器离站确认弹窗`);
-    return false;
+    return result(false);
   }
   window.location.assign(url);
-  return true;
+  return result(true, { openedCleanTab: false });
 }
 
 function getButtonDisabledReason(button) {
@@ -412,11 +413,6 @@ async function startIntentReplyFlow({ statusId, replyText, tweetAuthor, tweetCon
   if (!statusId) return false;
   addLog('info', `${reason || '开始 X 官方 intent 回复'}，打开官方回复页`);
   const targetUrl = getIntentReplyUrl(statusId, replyText);
-  const canNavigate = await closeOpenComposerBeforeNavigation('打开 X 官方 intent 回复页');
-  if (!canNavigate) {
-    pauseAutomation('打开 X 官方 intent 回复页前无法关闭当前未发送编辑器，已暂停以避免浏览器离站确认弹窗');
-    return false;
-  }
   await setLocalStorage({
     pendingReply: {
       statusId,
@@ -429,11 +425,17 @@ async function startIntentReplyFlow({ statusId, replyText, tweetAuthor, tweetCon
     isAutoPaused: false,
     pauseReason: ''
   });
-  window.location.assign(targetUrl);
-  setTimeout(() => {
-    isAutomatorBusy = false;
-    handlePendingReply();
-  }, 3500);
+  const navigation = await safeNavigateTo(targetUrl, '打开 X 官方 intent 回复页', {
+    openCleanTabOnBlocked: true,
+    returnDetails: true
+  });
+  if (!navigation.success) return false;
+  if (!navigation.openedCleanTab) {
+    setTimeout(() => {
+      isAutomatorBusy = false;
+      handlePendingReply();
+    }, 3500);
+  }
   return true;
 }
 
@@ -901,7 +903,7 @@ async function handlePendingReply() {
         && (window.location.search.includes('in_reply_to') || window.location.search.includes(pending.statusId));
       if (!isReplyIntentPage) {
         addLog('info', '打开 X 官方 intent 回复页');
-        await safeNavigateTo(getIntentReplyUrl(pending.statusId, pending.replyText), '打开 X 官方 intent 回复页');
+        await safeNavigateTo(getIntentReplyUrl(pending.statusId, pending.replyText), '打开 X 官方 intent 回复页', { openCleanTabOnBlocked: true });
         return;
       }
 
