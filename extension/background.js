@@ -148,6 +148,36 @@ const GROWTH_PLAYBOOKS = {
   }
 };
 
+const DEFAULT_INTERACTION_TARGETS = {
+  ai_product_kol: ['zarazhangrui', 'swyx', 'aakashg0', 'lennysan', 'kfk_ai', 'karpathy', 'sama'],
+  monetization_global: ['Leobai825', 'levelsio', 'dvassallo', 'codie_sanchez', 'naval', 'gregisenberg'],
+  indie_builder: ['levelsio', 'marckohlbrugge', 'patio11', 'robj3d3', 'dvassallo', 'gregisenberg'],
+  research_growth: ['aakashg0', 'lennysan', 'shreyas', 'packyM', 'benthompson', 'stratechery'],
+  brand_official: ['OpenAI', 'NotionHQ', 'Linear', 'vercel', 'cursor_ai', 'AnthropicAI']
+};
+
+function normalizeHandleList(values = []) {
+  return values
+    .flatMap(value => String(value || '').split(/[\s,，、\n]+/))
+    .map(item => item.trim().replace(/^https?:\/\/(?:www\.)?(?:x|twitter)\.com\//i, '').replace(/^@/, '').split('/')[0])
+    .filter(item => /^[A-Za-z0-9_]{1,15}$/.test(item));
+}
+
+function formatHandleList(values = []) {
+  return [...new Set(normalizeHandleList(values))].join('\n');
+}
+
+function getDefaultInteractionTargets(context = {}) {
+  const explicitArchetype = context.id
+    || context.strategyArchetype
+    || context.onboardingStrategy?.strategyArchetype;
+  if (DEFAULT_INTERACTION_TARGETS[explicitArchetype]) {
+    return DEFAULT_INTERACTION_TARGETS[explicitArchetype];
+  }
+  const playbook = selectGrowthPlaybook(context);
+  return DEFAULT_INTERACTION_TARGETS[playbook.id] || DEFAULT_INTERACTION_TARGETS.indie_builder;
+}
+
 function collectSignalText(...items) {
   return items
     .map(item => memoryValueToText(item))
@@ -1832,7 +1862,8 @@ ${playbookCatalog}
 2. 目标用户为什么会关注：情绪价值、工具价值、行业内幕、身份认同、可复制方法中的哪几个。
 3. 第一周内容矩阵：涨粉内容、建信任内容、转化内容、互动钩子内容、人设加深内容。
 4. 评论引流资产：判断用户是否更适合导向产品/工具、高质量帖子/资料，还是暂不设置引流资产。
-5. 爆款热帖风格：必须生成 3 个候选首帖，并按 6 项 1-10 分打分。
+5. 自动生成 5-10 个优先互动账号：必须是该策略模板下值得观察/回复的创作者或品牌账号；如果不确定，用模板给出的默认账号池，不要把选择责任交给用户。
+6. 爆款热帖风格：必须生成 3 个候选首帖，并按 6 项 1-10 分打分。
 
 评分维度：
 - hook: 开头是否能让人停住
@@ -1859,6 +1890,7 @@ ${playbookCatalog}
   "targetTimezone": "Asia/Shanghai|America/Los_Angeles|America/New_York|Europe/London|Asia/Tokyo|Asia/Seoul",
   "growthGoal": "首月新增 1000 粉丝",
   "automationMode": "review",
+  "recommendedInteractionTargets": ["handle1", "handle2"],
   "firstTweetText": "从 firstTweetCandidates 中选择总分最高的一条",
   "firstTweetCandidates": [
     {
@@ -1931,6 +1963,13 @@ function normalizeOnboardingAnalysis(parsed = {}, sourceInput = '') {
     agentMemory: parsed.memory || parsed.agentMemory,
     sourceInput
   });
+  const recommendedInteractionTargets = formatHandleList([
+    parsed.recommendedInteractionTargets,
+    parsed.interactionTargets,
+    getDefaultInteractionTargets(fallbackPlaybook)
+  ]);
+  const memory = mergeAgentMemory(DEFAULT_AGENT_MEMORY, parsed.memory || parsed.agentMemory || {});
+  memory.interactionTargets = recommendedInteractionTargets;
 
   return {
     sourceInput: parsed.sourceInput || sourceInput,
@@ -1948,6 +1987,7 @@ function normalizeOnboardingAnalysis(parsed = {}, sourceInput = '') {
     targetTimezone: pick(parsed.targetTimezone, ['Asia/Shanghai', 'America/Los_Angeles', 'America/New_York', 'Europe/London', 'Asia/Tokyo', 'Asia/Seoul'], 'Asia/Shanghai'),
     growthGoal: memoryValueToText(parsed.growthGoal) || '首月新增 1000 粉丝',
     automationMode: pick(parsed.automationMode, ['auto', 'review', 'shadowReply'], 'review'),
+    recommendedInteractionTargets: recommendedInteractionTargets.split('\n').filter(Boolean),
     firstTweetText: bestViralCandidate(parsed.firstTweetCandidates, memoryValueToText(parsed.firstTweetText)),
     firstTweetCandidates: Array.isArray(parsed.firstTweetCandidates) ? parsed.firstTweetCandidates : [],
     leadTarget: memoryValueToText(parsed.leadTarget),
@@ -1956,7 +1996,7 @@ function normalizeOnboardingAnalysis(parsed = {}, sourceInput = '') {
       characteristics: memoryValueToText(parsed.persona?.characteristics),
       goals: memoryValueToText(parsed.persona?.goals)
     },
-    memory: mergeAgentMemory(DEFAULT_AGENT_MEMORY, parsed.memory || parsed.agentMemory || {}),
+    memory,
     competitorReport: memoryValueToText(parsed.competitorReport)
   };
 }

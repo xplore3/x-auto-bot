@@ -128,6 +128,14 @@ const STRATEGY_ARCHETYPE_LABELS = {
   brand_official: '产品官方品牌号'
 };
 
+const DEFAULT_INTERACTION_TARGETS = {
+  ai_product_kol: ['zarazhangrui', 'swyx', 'aakashg0', 'lennysan', 'kfk_ai', 'karpathy', 'sama'],
+  monetization_global: ['Leobai825', 'levelsio', 'dvassallo', 'codie_sanchez', 'naval', 'gregisenberg'],
+  indie_builder: ['levelsio', 'marckohlbrugge', 'patio11', 'robj3d3', 'dvassallo', 'gregisenberg'],
+  research_growth: ['aakashg0', 'lennysan', 'shreyas', 'packyM', 'benthompson', 'stratechery'],
+  brand_official: ['OpenAI', 'NotionHQ', 'Linear', 'vercel', 'cursor_ai', 'AnthropicAI']
+};
+
 const LANGUAGE_LABELS = {
   en: '英语',
   ja: '日语',
@@ -668,6 +676,8 @@ function syncWizardToFields(options = {}) {
   const language = LANGUAGE_LABELS[strategy.preferredLanguage] || LANGUAGE_LABELS['zh-CN'];
   const source = strategy.sourceInput || '尚未输入来源';
   const firstTweet = strategy.firstTweetText || composeFirstTweet(strategy);
+  const sourceTargets = normalizeHandleList([extractSourceHandles(source)]);
+  const interactionTargetList = formatHandleList([...sourceTargets, ...getDefaultInteractionTargets(strategy)]);
 
   setFieldValue('postsPerDay', String(plan.postsPerDay), overwrite);
   setFieldValue('postScheduleMode', 'smart', overwrite);
@@ -678,7 +688,7 @@ function syncWizardToFields(options = {}) {
   setFieldValue('aiTargetUsers', audience.join('\n'), overwrite);
   setFieldValue('aiGoals', `${strategy.growthGoal || '首月新增 1000 粉丝'}；用 ${role} 的方式建立信任、获取关注、沉淀潜在客户，并把日常输入转化为稳定内容输出。`, overwrite);
   setFieldValue('aiCharacteristics', `语言：${language}\n账号角色：${role}\n内容策略模板：${archetype}\n默认文案流派：${style}\n内容配比：${plan.mix}\n表达要具体、可信、有判断力，避免空泛鸡血。`, overwrite);
-  setFieldValue('targetUsers', extractSourceHandles(source), overwrite);
+  setFieldValue('targetUsers', interactionTargetList, overwrite);
   setFieldValue('testPostText', firstTweet, overwrite);
   setFieldValue('firstTweetPreview', firstTweet, overwrite);
 
@@ -695,7 +705,7 @@ function syncWizardToFields(options = {}) {
     boundaries: '不做擦边内容；不碰政治动员；不承诺投资收益；不编造履历、客户和数据；不刷屏；不诱导私信轰炸。',
     voiceRules: buildVoiceRules(strategy),
     bannedClaims: '禁止“稳赚”“保证涨粉”“保证成交”“内部消息”“无风险收益”等不可验证承诺。',
-    interactionTargets: audience.join('\n'),
+    interactionTargets: interactionTargetList,
     replyStrategy: buildReplyStrategy(strategy),
     sourceInputs: source,
     weeklyReviewSignals: '每周复盘：涨粉来源、回复率、收藏率、转发率、评论带来的关注、误解或争议点、可复用选题。'
@@ -713,6 +723,22 @@ function setFieldValue(id, value, overwrite = true) {
   const el = document.getElementById(id);
   if (!el) return;
   if (overwrite || !el.value.trim()) el.value = value || '';
+}
+
+function normalizeHandleList(values = []) {
+  return values
+    .flatMap(value => String(value || '').split(/[\s,，、\n]+/))
+    .map(item => item.trim().replace(/^https?:\/\/(?:www\.)?(?:x|twitter)\.com\//i, '').replace(/^@/, '').split('/')[0])
+    .filter(item => /^[A-Za-z0-9_]{1,15}$/.test(item));
+}
+
+function formatHandleList(values = []) {
+  return [...new Set(normalizeHandleList(values))].join('\n');
+}
+
+function getDefaultInteractionTargets(strategy = {}) {
+  const archetype = strategy.strategyArchetype || DEFAULT_ONBOARDING_STRATEGY.strategyArchetype;
+  return DEFAULT_INTERACTION_TARGETS[archetype] || DEFAULT_INTERACTION_TARGETS.indie_builder;
 }
 
 function extractSourceHandles(source) {
@@ -775,7 +801,14 @@ function buildVoiceRules(strategy) {
 
 function buildReplyStrategy(strategy) {
   const audience = getAudienceLabels(strategy).join('、') || '目标用户';
-  return `优先回复 5-10 个赛道核心创作者和 ${audience} 正在讨论的话题。不要为了被看见而回复，只回复能让原帖变得更完整的内容。
+  const targets = formatHandleList(getDefaultInteractionTargets(strategy))
+    .split('\n')
+    .filter(Boolean)
+    .map(handle => `@${handle}`)
+    .join('、');
+  return `Agent 已自动生成种子互动账号池：${targets || '根据账号定位动态选择'}。
+
+优先回复这些赛道核心创作者和 ${audience} 正在讨论的话题。不要为了被看见而回复，只回复能让原帖变得更完整的内容。
 
 高价值回复三种结构：
 1. 补缺失角度：说出原帖没讲但读者需要的边界。
@@ -1000,6 +1033,12 @@ function applySourceAnalysis(analysis) {
     setFieldValue('aiCharacteristics', analysis.persona.characteristics || '', true);
     setFieldValue('aiGoals', analysis.persona.goals || '', true);
   }
+  if (analysis.recommendedInteractionTargets && !analysis.memory?.interactionTargets) {
+    analysis.memory = {
+      ...(analysis.memory || {}),
+      interactionTargets: formatHandleList(analysis.recommendedInteractionTargets)
+    };
+  }
   if (analysis.memory) fillAgentMemory(analysis.memory, false);
   if (analysis.leadTarget) setFieldValue('leadTarget', analysis.leadTarget, true);
   if (analysis.competitorReport) setFieldValue('competitorReport', analysis.competitorReport, true);
@@ -1028,6 +1067,7 @@ function createFallbackAnalysis(sourceInput) {
     preferredLanguage: 'zh-CN',
     targetTimezone: 'Asia/Shanghai',
     growthGoal: '首月新增 1000 粉丝',
+    recommendedInteractionTargets: getDefaultInteractionTargets({ strategyArchetype }),
     firstTweetText: ''
   };
 }

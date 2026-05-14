@@ -9,6 +9,13 @@ const REPLY_COOLDOWN_MS = 300000; // 5 minutes
 const REPLY_ATTEMPT_LOCK_MS = 60000; // short lock while the automator tries to send
 const MAX_LOGS = 50;
 const MIN_REPLY_OPPORTUNITY_SCORE = 58;
+const DEFAULT_INTERACTION_TARGETS = {
+  ai_product_kol: ['zarazhangrui', 'swyx', 'aakashg0', 'lennysan', 'kfk_ai', 'karpathy', 'sama'],
+  monetization_global: ['Leobai825', 'levelsio', 'dvassallo', 'codie_sanchez', 'naval', 'gregisenberg'],
+  indie_builder: ['levelsio', 'marckohlbrugge', 'patio11', 'robj3d3', 'dvassallo', 'gregisenberg'],
+  research_growth: ['aakashg0', 'lennysan', 'shreyas', 'packyM', 'benthompson', 'stratechery'],
+  brand_official: ['OpenAI', 'NotionHQ', 'Linear', 'vercel', 'cursor_ai', 'AnthropicAI']
+};
 
 // ==========================================
 // Logging System
@@ -412,11 +419,39 @@ function parseTargetHandles(text = '') {
     .map(item => item.toLowerCase());
 }
 
+function inferStrategyArchetype(state = {}) {
+  const strategy = state.onboardingStrategy || {};
+  const memory = state.agentMemory || {};
+  const persona = state.aiPersona || {};
+  const signal = [
+    strategy.strategyArchetype,
+    strategy.sourceInput,
+    persona.targetUsers,
+    persona.characteristics,
+    persona.goals,
+    memory.contentPillars,
+    memory.contentAngles,
+    memory.marketPosition
+  ].join('\n').toLowerCase();
+
+  if (DEFAULT_INTERACTION_TARGETS[strategy.strategyArchetype]) return strategy.strategyArchetype;
+  if (/leobai825|levelsio|出海|搞钱|副业|变现|monetization|income/.test(signal)) return 'monetization_global';
+  if (/indie|独立开发|build in public|mrr|saas/.test(signal)) return 'indie_builder';
+  if (/研究|投资|增长|research|vc|market|趋势/.test(signal)) return 'research_growth';
+  if (/brand|official|品牌|官网|产品官方/.test(signal)) return 'brand_official';
+  return 'ai_product_kol';
+}
+
+function getDefaultInteractionTargets(state = {}) {
+  return DEFAULT_INTERACTION_TARGETS[inferStrategyArchetype(state)] || DEFAULT_INTERACTION_TARGETS.ai_product_kol;
+}
+
 function collectTargetHandles(state = {}) {
   const memory = state.agentMemory || {};
   return [...new Set([
     ...parseTargetHandles(state.targetUsers),
-    ...parseTargetHandles(memory.interactionTargets)
+    ...parseTargetHandles(memory.interactionTargets),
+    ...parseTargetHandles(getDefaultInteractionTargets(state).join('\n'))
   ])];
 }
 
