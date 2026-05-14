@@ -100,6 +100,14 @@ function getIntentReplyUrl(statusId, text) {
   return `https://twitter.com/intent/tweet?in_reply_to=${encodeURIComponent(statusId || '')}&text=${encodeURIComponent(text || '')}`;
 }
 
+function getIntentParam(name) {
+  try {
+    return new URLSearchParams(window.location.search).get(name) || '';
+  } catch (error) {
+    return '';
+  }
+}
+
 function getStatusIdFromHref(href = '') {
   const match = String(href || '').match(/\/status\/(\d+)/);
   return match?.[1] || '';
@@ -781,7 +789,6 @@ async function handlePendingReply() {
     }
 
     isAutomatorBusy = true;
-    const expectedText = normalizeText(pending.replyText);
     chrome.storage.local.set({ isTyping: true });
 
     try {
@@ -796,6 +803,17 @@ async function handlePendingReply() {
         addLog('info', '打开 X 官方 intent 回复页');
         window.location.assign(getIntentReplyUrl(pending.statusId, pending.replyText));
         return;
+      }
+
+      const intentText = getIntentParam('text');
+      const replyTextForSend = intentText || pending.replyText;
+      const expectedText = normalizeText(replyTextForSend);
+      if (!expectedText) {
+        pauseAutomation('X intent 回复文本为空，已暂停');
+        return;
+      }
+      if (intentText && normalizeText(intentText) !== normalizeText(pending.replyText)) {
+        addLog('warn', '检测到本地待回复缓存与 X intent 文本不一致，已以页面 URL 预填文本为准');
       }
 
       const draftEditor = await waitForElement(findTweetEditor, 10000);
@@ -813,7 +831,7 @@ async function handlePendingReply() {
 
       if (actualText !== expectedText) {
         addLog('warn', 'X intent 未完成预填，尝试一次真实编辑器输入');
-        await simulateTyping(draftEditor, pending.replyText);
+        await simulateTyping(draftEditor, replyTextForSend);
         await sleep(1200);
         actualText = getEditorText(draftEditor);
       }
@@ -861,7 +879,7 @@ async function handlePendingReply() {
       consecutiveFailures = 0;
       await removeLocalStorage(['pendingReply']);
       addLog('success', `已通过 X 官方 intent 回复 @${pending.tweetAuthor || '未知用户'}：${outcome.reason}`);
-      notifyReplyCompleted(pending.tweetAuthor || '未知用户', pending.tweetContent || '', pending.replyText);
+      notifyReplyCompleted(pending.tweetAuthor || '未知用户', pending.tweetContent || '', replyTextForSend);
     } catch (error) {
       consecutiveFailures++;
       const reason = `X intent 自动回复异常: ${error.message} (连续失败 ${consecutiveFailures} 次)`;
