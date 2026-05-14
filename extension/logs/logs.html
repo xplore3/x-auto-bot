@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>X Voice Agent 行动记录</title>
+  <title>X Voice Agent 成果记录</title>
   <link rel="icon" href="../assets/icons/icon-32.png">
   <link rel="stylesheet" href="logs.css">
 </head>
@@ -12,9 +12,9 @@
       <div class="page-title">
         <img src="../assets/icons/icon-48.png" alt="" class="page-logo">
         <div>
-          <p class="eyebrow">Action Ledger</p>
-          <h1>Agent 行动记录</h1>
-          <p>追踪内容抓取、AI 生成、发帖链路、暂停原因和失败保护。</p>
+          <p class="eyebrow">Result Ledger</p>
+          <h1>Agent 成果记录</h1>
+          <p>只展示已发布、已回复、已跳过和失败暂停等结果，过滤滚动、冷却和内部调度噪音。</p>
         </div>
       </div>
       <a href="../options/options.html" class="btn-back">返回策略中心</a>
@@ -22,23 +22,23 @@
 
     <section class="stats-bar">
       <div class="stat-box">
-        <span class="stat-label">总记录</span>
+        <span class="stat-label">成果</span>
         <strong id="totalCount">0</strong>
       </div>
       <div class="stat-box info">
-        <span class="stat-label">信息</span>
+        <span class="stat-label">发布</span>
         <strong id="infoCount">0</strong>
       </div>
       <div class="stat-box success">
-        <span class="stat-label">成功</span>
+        <span class="stat-label">回复</span>
         <strong id="successCount">0</strong>
       </div>
       <div class="stat-box warn">
-        <span class="stat-label">警告</span>
+        <span class="stat-label">跳过</span>
         <strong id="warnCount">0</strong>
       </div>
       <div class="stat-box error">
-        <span class="stat-label">错误</span>
+        <span class="stat-label">需处理</span>
         <strong id="errorCount">0</strong>
       </div>
     </section>
@@ -86,7 +86,7 @@
         </thead>
         <tbody id="logTableBody">
           <tr class="empty-row">
-            <td colspan="4">暂无操作记录</td>
+            <td colspan="4">暂无成果记录</td>
           </tr>
         </tbody>
       </table>

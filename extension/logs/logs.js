@@ -51,20 +51,22 @@ function isSameLogs(oldArr, newArr) {
 }
 
 function updateStats() {
-  const counts = { info: 0, success: 0, warn: 0, error: 0 };
-  allLogs.forEach(log => {
-    if (counts[log.level] !== undefined) counts[log.level]++;
+  const resultLogs = allLogs.filter(isResultLog);
+  const counts = { post: 0, reply: 0, skip: 0, issue: 0 };
+  resultLogs.forEach(log => {
+    const kind = getResultLogKind(log);
+    if (counts[kind] !== undefined) counts[kind]++;
   });
 
-  document.getElementById('totalCount').textContent = allLogs.length;
-  document.getElementById('infoCount').textContent = counts.info;
-  document.getElementById('successCount').textContent = counts.success;
-  document.getElementById('warnCount').textContent = counts.warn;
-  document.getElementById('errorCount').textContent = counts.error;
+  document.getElementById('totalCount').textContent = resultLogs.length;
+  document.getElementById('infoCount').textContent = counts.post;
+  document.getElementById('successCount').textContent = counts.reply;
+  document.getElementById('warnCount').textContent = counts.skip;
+  document.getElementById('errorCount').textContent = counts.issue;
 }
 
 function getFilteredLogs() {
-  return allLogs.filter(log => {
+  return allLogs.filter(isResultLog).filter(log => {
     const levelMatch = currentLevel === 'all' || log.level === currentLevel;
     const sourceMatch = currentSource === 'all' || log.source === currentSource;
     return levelMatch && sourceMatch;
@@ -78,7 +80,7 @@ function createLogRow(log) {
   const levelClass = log.level || 'info';
   const levelText = LEVEL_LABELS[log.level] || log.level;
   const sourceText = SOURCE_LABELS[log.source] || log.source || '未知';
-  const msg = escapeHtml(log.message || '');
+  const msg = escapeHtml(formatResultLogMessage(log));
 
   tr.innerHTML = `
     <td><span class="log-time">${time}</span></td>
@@ -101,7 +103,8 @@ function renderTable() {
   const filtered = getFilteredLogs();
 
   if (filtered.length === 0) {
-    tbody.replaceChildren(createEmptyRow(allLogs.length === 0 ? '暂无操作记录' : '没有符合筛选条件的记录'));
+    const resultCount = allLogs.filter(isResultLog).length;
+    tbody.replaceChildren(createEmptyRow(resultCount === 0 ? '暂无成果记录：完成发布或回复后会显示在这里' : '没有符合筛选条件的成果记录'));
     return;
   }
 
@@ -179,13 +182,55 @@ function setupAutoRefresh() {
 
 function setupClearButton() {
   document.getElementById('clearBtn').addEventListener('click', () => {
-    if (!confirm('确定要清空所有操作记录吗？此操作不可恢复。')) return;
+    if (!confirm('确定要清空所有记录吗？此操作不可恢复。')) return;
     chrome.storage.local.set({ logs: [] }, () => {
       allLogs = [];
       updateStats();
       renderTable();
     });
   });
+}
+
+function isResultLog(log = {}) {
+  const message = String(log.message || '');
+  const resultPatterns = [
+    /已通过 X 官方 intent 回复/,
+    /确认已回复/,
+    /已回复 @/,
+    /队列推文发送成功/,
+    /测试推文发送成功/,
+    /定时推文发送成功/,
+    /X 原生定时发布(创建|写入)成功/,
+    /已发 \d+ 条/,
+    /已跳过/,
+    /跳过 @/,
+    /自动操作已暂停/,
+    /已暂停/,
+    /未确认成功/,
+    /发送失败/,
+    /发推失败/,
+    /回复失败/
+  ];
+  return resultPatterns.some(pattern => pattern.test(message));
+}
+
+function getResultLogKind(log = {}) {
+  const message = String(log.message || '');
+  if (/已跳过|跳过 @/.test(message)) return 'skip';
+  if (/已通过 X 官方 intent 回复|确认已回复|已回复 @|已回/.test(message)) return 'reply';
+  if (/推文发送成功|定时推文发送成功|测试推文发送成功|X 原生定时发布|已发 \d+ 条/.test(message)) return 'post';
+  if (/已暂停|失败|未确认成功|发送失败|未读取到|未找到|取消/.test(message) || log.level === 'error') return 'issue';
+  return 'skip';
+}
+
+function formatResultLogMessage(log = {}) {
+  return String(log.message || '')
+    .replace(/^✅\s*/, '')
+    .replace(/^⚠️\s*/, '')
+    .replace(/，进入 \d+ 分钟互动冷却$/, '')
+    .replace(/：检测到 X 发送成功提示$/, '')
+    .replace(/：编辑器已关闭$/, '')
+    .trim();
 }
 
 function escapeHtml(text) {

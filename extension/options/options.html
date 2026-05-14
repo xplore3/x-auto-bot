@@ -24,7 +24,7 @@
         <a href="#runtime" data-module-link="runtime">模型发布</a>
         <a href="#advanced-memory" data-module-link="advanced-memory">知识库</a>
         <a href="#diagnostics" data-module-link="diagnostics">测试复盘</a>
-        <a href="#logs" data-module-link="logs">行动日志</a>
+        <a href="#logs" data-module-link="logs">成果记录</a>
       </nav>
     </aside>
 
@@ -94,7 +94,7 @@
           <button class="quick-card" type="button" data-open-module="diagnostics">
             <span>03</span>
             <strong>测试并复盘</strong>
-            <em>先验证中文发帖和日志，再把有效信号写回长期记忆。</em>
+            <em>先验证中文发帖和成果记录，再把有效信号写回长期记忆。</em>
           </button>
         </div>
       </section>
@@ -473,7 +473,7 @@
               <option value="localQueue">本地到点自动发（Chrome/X 页面需要在线）</option>
               <option value="xNativeSchedule">写入 X 原生定时发布（挂机时一次性排程）</option>
             </select>
-            <p class="help-text">推荐想“挂机一段时间就排好后续内容”的用户选择 X 原生定时发布；若 X 页面结构变化导致排程失败，会暂停并写日志。</p>
+            <p class="help-text">推荐想“挂机一段时间就排好后续内容”的用户选择 X 原生定时发布；若 X 页面结构变化导致排程失败，会暂停并显示可读原因。</p>
           </div>
 
           <div class="form-group">
@@ -742,9 +742,9 @@
               <li>输入框文本是否与待发文本一致</li>
               <li>中文和换行是否保留</li>
               <li>发送按钮是否由 X 自身判定可用</li>
-              <li>失败时是否暂停并写入日志</li>
+              <li>失败时是否暂停并写入可读原因</li>
             </ul>
-            <a class="btn-secondary log-link" href="#logs" data-open-module="logs">查看行动记录</a>
+            <a class="btn-secondary log-link" href="#logs" data-open-module="logs">查看成果记录</a>
           </aside>
         </div>
 
@@ -766,34 +766,34 @@
       <section class="panel logs-panel module-panel" id="logs" data-module="logs">
         <div class="panel-head">
           <div>
-            <p class="eyebrow">Activity Log</p>
-            <h2>行动日志</h2>
-            <p class="panel-intro">所有后台调度、发帖、回复、失败暂停和 AI 生成动作都会记录在这里，不需要打开新页面。</p>
+            <p class="eyebrow">Result Ledger</p>
+            <h2>成果记录</h2>
+            <p class="panel-intro">只展示已发布、已回复、已跳过和失败暂停等结果，不展示滚动、冷却和内部调度噪音。</p>
           </div>
-          <button id="refreshLogsBtn" class="btn-secondary" type="button">刷新日志</button>
+          <button id="refreshLogsBtn" class="btn-secondary" type="button">刷新成果</button>
         </div>
 
         <div class="log-summary-grid">
           <div class="log-summary-card">
-            <span>全部</span>
+            <span>成果</span>
             <strong id="inlineLogTotal">0</strong>
           </div>
           <div class="log-summary-card">
-            <span>成功</span>
+            <span>发布</span>
             <strong id="inlineLogSuccess">0</strong>
           </div>
           <div class="log-summary-card">
-            <span>警告</span>
+            <span>回复</span>
             <strong id="inlineLogWarn">0</strong>
           </div>
           <div class="log-summary-card">
-            <span>错误</span>
+            <span>需处理</span>
             <strong id="inlineLogError">0</strong>
           </div>
         </div>
 
         <div id="inlineLogList" class="inline-log-list">
-          <div class="inline-log-empty">暂无操作记录</div>
+          <div class="inline-log-empty">暂无成果记录</div>
         </div>
       </section>
 

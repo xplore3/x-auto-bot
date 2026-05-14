@@ -700,6 +700,40 @@ function formatLogTime(ts) {
   return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}:${d.getSeconds().toString().padStart(2,'0')}`;
 }
 
+function isResultLog(log = {}) {
+  const message = String(log.message || '');
+  const resultPatterns = [
+    /已通过 X 官方 intent 回复/,
+    /确认已回复/,
+    /已回复 @/,
+    /队列推文发送成功/,
+    /测试推文发送成功/,
+    /定时推文发送成功/,
+    /X 原生定时发布(创建|写入)成功/,
+    /已发 \d+ 条/,
+    /已跳过/,
+    /跳过 @/,
+    /自动操作已暂停/,
+    /已暂停/,
+    /未确认成功/,
+    /发送失败/,
+    /发推失败/,
+    /回复失败/
+  ];
+  return resultPatterns.some(pattern => pattern.test(message));
+}
+
+function formatResultLogMessage(log = {}) {
+  const message = String(log.message || '');
+  return message
+    .replace(/^✅\s*/, '')
+    .replace(/^⚠️\s*/, '')
+    .replace(/，进入 \d+ 分钟互动冷却$/, '')
+    .replace(/：检测到 X 发送成功提示$/, '')
+    .replace(/：编辑器已关闭$/, '')
+    .trim();
+}
+
 function getLevelEmoji(level) {
   switch (level) {
     case 'success': return '✅';
@@ -816,6 +850,7 @@ function renderWidget() {
   }
 
   const repliesSent = botState.stats ? botState.stats.repliesSent : 0;
+  const postsToday = Number(botState.postsToday) || 0;
   const timeStr = new Date().toLocaleTimeString('en-US', { hour12: false });
   const nextPostStr = botState.nextPostTime ? botState.nextPostTime : '待计算';
   const logoUrl = chrome.runtime.getURL('assets/icons/icon-48.png');
@@ -829,14 +864,15 @@ function renderWidget() {
   })();
 
   const logs = botState.logs || [];
-  const recentLogs = logs.slice(-12);
-  const logRows = recentLogs.length === 0
-    ? '<div class="x-bot-log-item"><span class="x-bot-log-msg info">暂无日志...</span></div>'
-    : recentLogs.map(log => `
+  const resultLogs = logs.filter(isResultLog);
+  const recentResultLogs = resultLogs.slice(-8);
+  const logRows = recentResultLogs.length === 0
+    ? '<div class="x-bot-log-item"><span class="x-bot-log-msg info">暂无成果记录：完成发布或回复后会显示在这里</span></div>'
+    : recentResultLogs.map(log => `
         <div class="x-bot-log-item" data-time="${log.time}">
           <span class="x-bot-log-time">${formatLogTime(log.time)}</span>
           <span class="x-bot-log-level">${getLevelEmoji(log.level || 'info')}</span>
-          <span class="x-bot-log-msg ${log.level || 'info'}">${escapeHtml(log.message || '')}</span>
+          <span class="x-bot-log-msg ${log.level || 'info'}">${escapeHtml(formatResultLogMessage(log))}</span>
         </div>
       `).join('');
 
@@ -1166,14 +1202,14 @@ function renderWidget() {
         <strong>${escapeHtml(nextPostStr)}</strong>
       </div>
       <div class="x-bot-mini-stat">
-        <span>今日互动</span>
-        <strong>${repliesSent} 次</strong>
+        <span>今日成果</span>
+        <strong>已发 ${postsToday} / 已回 ${repliesSent}</strong>
       </div>
     </div>
 
     <div class="x-bot-log-panel">
       <div class="x-bot-log-toggle" id="x-bot-log-toggle">
-        <span>行动记录 (${logs.length})</span>
+        <span>成果记录 (${resultLogs.length})</span>
         <span class="x-bot-log-toggle-icon ${logPanelOpen ? 'open' : ''}">›</span>
       </div>
       <div class="x-bot-log-list ${logPanelOpen ? 'open' : ''}" id="x-bot-log-list">

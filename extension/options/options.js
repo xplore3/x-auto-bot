@@ -225,12 +225,12 @@ const MODULE_META = {
   diagnostics: {
     eyebrow: 'Test & Review',
     title: '测试发布链路并复盘效果',
-    description: '先验证中文发帖、登录态、日志和失败保护，再把有效内容信号沉淀回知识库。'
+    description: '先验证中文发帖、登录态、成果记录和失败保护，再把有效内容信号沉淀回知识库。'
   },
   logs: {
-    eyebrow: 'Activity Log',
-    title: '查看 Agent 行动记录',
-    description: '后台调度、发帖、回复、失败暂停和 AI 生成动作都在这里记录，用来判断系统是否稳定工作。'
+    eyebrow: 'Result Ledger',
+    title: '查看 Agent 成果记录',
+    description: '这里只展示已发布、已回复、已跳过和失败暂停等结果，隐藏内部调度噪音。'
   }
 };
 
@@ -1121,7 +1121,7 @@ function testPostNow() {
         showStatus(`测试发帖启动失败：${response?.error || '未知错误'}`, '#ff4d4f', 6000);
         return;
       }
-      showStatus('已启动测试发帖，请查看 X 标签页和操作记录。', '#17bf63', 5000);
+      showStatus('已启动测试发帖，请查看 X 标签页和成果记录。', '#17bf63', 5000);
     });
   });
 }
@@ -1213,24 +1213,68 @@ function loadInlineLogs() {
   });
 }
 
+function isResultLog(log = {}) {
+  const message = String(log.message || '');
+  const resultPatterns = [
+    /已通过 X 官方 intent 回复/,
+    /确认已回复/,
+    /已回复 @/,
+    /队列推文发送成功/,
+    /测试推文发送成功/,
+    /定时推文发送成功/,
+    /X 原生定时发布(创建|写入)成功/,
+    /已发 \d+ 条/,
+    /已跳过/,
+    /跳过 @/,
+    /自动操作已暂停/,
+    /已暂停/,
+    /未确认成功/,
+    /发送失败/,
+    /发推失败/,
+    /回复失败/
+  ];
+  return resultPatterns.some(pattern => pattern.test(message));
+}
+
+function getResultLogKind(log = {}) {
+  const message = String(log.message || '');
+  if (/已跳过|跳过 @/.test(message)) return 'skip';
+  if (/回复|intent 回复|已回/.test(message)) return 'reply';
+  if (/推文发送成功|定时推文发送成功|测试推文发送成功|X 原生定时发布|已发 \d+ 条/.test(message)) return 'post';
+  if (/已暂停|失败|未确认成功|发送失败|未读取到|未找到|取消/.test(message) || log.level === 'error') return 'issue';
+  return 'other';
+}
+
+function formatResultLogMessage(log = {}) {
+  return String(log.message || '')
+    .replace(/^✅\s*/, '')
+    .replace(/^⚠️\s*/, '')
+    .replace(/，进入 \d+ 分钟互动冷却$/, '')
+    .replace(/：检测到 X 发送成功提示$/, '')
+    .replace(/：编辑器已关闭$/, '')
+    .trim();
+}
+
 function renderInlineLogs(logs = []) {
   const list = document.getElementById('inlineLogList');
   if (!list) return;
 
-  const counts = { success: 0, warn: 0, error: 0 };
-  logs.forEach((log) => {
-    if (counts[log.level] !== undefined) counts[log.level] += 1;
+  const resultLogs = logs.filter(isResultLog);
+  const counts = { post: 0, reply: 0, issue: 0 };
+  resultLogs.forEach((log) => {
+    const kind = getResultLogKind(log);
+    if (counts[kind] !== undefined) counts[kind] += 1;
   });
-  setText('inlineLogTotal', String(logs.length));
-  setText('inlineLogSuccess', String(counts.success));
-  setText('inlineLogWarn', String(counts.warn));
-  setText('inlineLogError', String(counts.error));
+  setText('inlineLogTotal', String(resultLogs.length));
+  setText('inlineLogSuccess', String(counts.post));
+  setText('inlineLogWarn', String(counts.reply));
+  setText('inlineLogError', String(counts.issue));
 
-  const recentLogs = logs.slice(-40).reverse();
+  const recentLogs = resultLogs.slice(-40).reverse();
   if (recentLogs.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'inline-log-empty';
-    empty.textContent = '暂无操作记录';
+    empty.textContent = '暂无成果记录：完成发布或回复后会显示在这里';
     list.replaceChildren(empty);
     return;
   }
@@ -1249,8 +1293,7 @@ function renderInlineLogs(logs = []) {
 
     const message = document.createElement('span');
     message.className = 'inline-log-message';
-    const source = LOG_SOURCE_LABELS[log.source] || log.source || '未知';
-    message.textContent = `[${source}] ${log.message || ''}`;
+    message.textContent = formatResultLogMessage(log);
 
     row.append(time, level, message);
     return row;
