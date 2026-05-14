@@ -702,8 +702,13 @@ function formatLogTime(ts) {
 
 function isResultLog(log = {}) {
   const message = String(log.message || '');
+  if (/跳过推文抓取|不启动自动滚动|停止自动滚动|跳过发推调度|跳过本次发推|跳过发推|跳过 intent 回复|机器人已停止|用户手动恢复/.test(message)) {
+    return false;
+  }
   const resultPatterns = [
     /已通过 X 官方 intent 回复/,
+    /X 提示已回复过/,
+    /X 提示这条内容已发布过/,
     /确认已回复/,
     /已回复 @/,
     /队列推文发送成功/,
@@ -865,7 +870,7 @@ function renderWidget() {
 
   const logs = botState.logs || [];
   const resultLogs = logs.filter(isResultLog);
-  const recentResultLogs = resultLogs.slice(-8);
+  const recentResultLogs = resultLogs.slice(-8).reverse();
   const logRows = recentResultLogs.length === 0
     ? '<div class="x-bot-log-item"><span class="x-bot-log-msg info">暂无成果记录：完成发布或回复后会显示在这里</span></div>'
     : recentResultLogs.map(log => `

@@ -193,8 +193,13 @@ function setupClearButton() {
 
 function isResultLog(log = {}) {
   const message = String(log.message || '');
+  if (/跳过推文抓取|不启动自动滚动|停止自动滚动|跳过发推调度|跳过本次发推|跳过发推|跳过 intent 回复|机器人已停止|用户手动恢复/.test(message)) {
+    return false;
+  }
   const resultPatterns = [
     /已通过 X 官方 intent 回复/,
+    /X 提示已回复过/,
+    /X 提示这条内容已发布过/,
     /确认已回复/,
     /已回复 @/,
     /队列推文发送成功/,
@@ -217,8 +222,8 @@ function isResultLog(log = {}) {
 function getResultLogKind(log = {}) {
   const message = String(log.message || '');
   if (/已跳过|跳过 @/.test(message)) return 'skip';
-  if (/已通过 X 官方 intent 回复|确认已回复|已回复 @|已回/.test(message)) return 'reply';
-  if (/推文发送成功|定时推文发送成功|测试推文发送成功|X 原生定时发布|已发 \d+ 条/.test(message)) return 'post';
+  if (/已通过 X 官方 intent 回复|确认已回复|已回复 @|已回|X 提示已回复过/.test(message)) return 'reply';
+  if (/推文发送成功|定时推文发送成功|测试推文发送成功|X 原生定时发布|已发 \d+ 条|X 提示这条内容已发布过/.test(message)) return 'post';
   if (/已暂停|失败|未确认成功|发送失败|未读取到|未找到|取消/.test(message) || log.level === 'error') return 'issue';
   return 'skip';
 }

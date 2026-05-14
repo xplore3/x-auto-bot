@@ -68,6 +68,17 @@ function notifyReplyCompleted(tweetAuthor, tweetContent, replyText) {
   });
 }
 
+function notifyPostCompleted(source) {
+  chrome.runtime.sendMessage({
+    action: 'postCompleted',
+    source: source || 'queue'
+  }, () => {
+    if (chrome.runtime.lastError) {
+      chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingScheduledAt']);
+    }
+  });
+}
+
 function setLocalStorage(values) {
   return new Promise(resolve => chrome.storage.local.set(values, resolve));
 }
@@ -280,6 +291,21 @@ function getVisibleSendError() {
     /请稍后再试[^。\n]*/,
     /发送失败[^。\n]*/,
     /无法发送[^。\n]*/
+  ];
+  const match = patterns.map(pattern => text.match(pattern)?.[0]).find(Boolean);
+  return match || '';
+}
+
+function getDuplicateSendSignal() {
+  const text = getPageText();
+  const patterns = [
+    /You already said that[^。\n]*/i,
+    /You already posted that[^。\n]*/i,
+    /Whoops[^。\n]*already[^。\n]*/i,
+    /已经发过了[^。\n]*/,
+    /你已经发过了[^。\n]*/,
+    /已经发布过[^。\n]*/,
+    /重复内容[^。\n]*/
   ];
   const match = patterns.map(pattern => text.match(pattern)?.[0]).find(Boolean);
   return match || '';
@@ -571,6 +597,11 @@ async function waitForIntentSendOutcome(expectedText, timeout = 18000) {
   let sawSendingState = false;
 
   while (Date.now() - startedAt < timeout) {
+    const duplicate = getDuplicateSendSignal();
+    if (duplicate) {
+      return { status: 'duplicate', reason: duplicate };
+    }
+
     const error = getVisibleSendError();
     if (error) {
       return { status: 'failed', reason: error };
@@ -871,14 +902,16 @@ async function handlePendingReply() {
         }
       }
 
-      if (outcome.status !== 'success') {
+      if (!['success', 'duplicate'].includes(outcome.status)) {
         pauseAutomation(`X intent 回复未确认成功，已暂停。${outcome.reason}`);
         return;
       }
 
       consecutiveFailures = 0;
       await removeLocalStorage(['pendingReply']);
-      addLog('success', `已通过 X 官方 intent 回复 @${pending.tweetAuthor || '未知用户'}：${outcome.reason}`);
+      addLog('success', outcome.status === 'duplicate'
+        ? `X 提示已回复过 @${pending.tweetAuthor || '未知用户'}，已按完成处理：${outcome.reason}`
+        : `已通过 X 官方 intent 回复 @${pending.tweetAuthor || '未知用户'}：${outcome.reason}`);
       notifyReplyCompleted(pending.tweetAuthor || '未知用户', pending.tweetContent || '', replyTextForSend);
     } catch (error) {
       consecutiveFailures++;
@@ -952,6 +985,13 @@ async function handlePendingPost() {
       }
 
       addLog('success', `推文文本校验通过 (${postText.length} 字)`);
+      const duplicateBeforeClick = getDuplicateSendSignal();
+      if (duplicateBeforeClick) {
+        consecutiveFailures = 0;
+        addLog('success', `X 提示这条内容已发布过，已消费当前待发任务：${duplicateBeforeClick}`);
+        notifyPostCompleted(result.pendingPostSource || 'queue');
+        return;
+      }
 
       if (isNativeSchedule) {
         const scheduled = await applyNativeSchedule(result.pendingScheduledAt);
@@ -986,31 +1026,35 @@ async function handlePendingPost() {
         return;
       }
 
-      simulateRealClick(sendBtn);
-      addLog('info', '已点击发推按钮');
-      await waitForElement(() => {
-        const editorStillOpen = document.querySelector('div[role="dialog"]') || findTweetEditor();
-        return editorStillOpen ? null : document.body;
-      }, 10000, 500);
+      await clickElementReliably(sendBtn, isNativeSchedule ? 'X 定时发布确认按钮' : '发推按钮');
+      let outcome = await waitForIntentSendOutcome(expectedText, 10000);
+      if (outcome.status === 'pending') {
+        const dialog = findActiveDialog();
+        const editor = findTweetEditor(dialog || document);
+        const retryButton = await waitForEnabledButton(() => {
+          const activeDialog = findActiveDialog();
+          return activeDialog ? findSendButton(activeDialog) : findSendButton(document);
+        }, 2000);
 
-      const editorStillOpen = document.querySelector('div[role="dialog"]') || findTweetEditor();
-      if (editorStillOpen) {
+        if (retryButton && getEditorText(editor) === expectedText) {
+          addLog('warn', '首次点击发推后未检测到发送结果，重试一次真实鼠标点击');
+          await clickElementReliably(retryButton, '发推按钮重试');
+          outcome = await waitForIntentSendOutcome(expectedText, 18000);
+        }
+      }
+
+      if (!['success', 'duplicate'].includes(outcome.status)) {
         consecutiveFailures++;
-        addLog('warn', `发帖框仍在，发推可能未完成 (连续失败 ${consecutiveFailures} 次)`);
-        checkAndPause();
+        addLog('warn', `发帖未确认成功，已暂停。${outcome.reason} (连续失败 ${consecutiveFailures} 次)`);
+        pauseAutomation(`发帖未确认成功，已暂停。${outcome.reason}`);
         return;
       }
 
       consecutiveFailures = 0;
-      addLog('success', isManualTest ? '测试推文发送成功！' : (isNativeSchedule ? 'X 原生定时发布创建成功！' : '定时推文发送成功！'));
-      chrome.runtime.sendMessage({
-        action: 'postCompleted',
-        source: result.pendingPostSource || 'queue'
-      }, () => {
-        if (chrome.runtime.lastError) {
-          chrome.storage.local.remove(['pendingPost', 'pendingPostId', 'pendingPostSource', 'pendingScheduledAt']);
-        }
-      });
+      addLog('success', outcome.status === 'duplicate'
+        ? `X 提示这条内容已发布过，已消费当前待发任务：${outcome.reason}`
+        : (isManualTest ? `测试推文发送成功！${outcome.reason}` : (isNativeSchedule ? `X 原生定时发布创建成功！${outcome.reason}` : `定时推文发送成功！${outcome.reason}`)));
+      notifyPostCompleted(result.pendingPostSource || 'queue');
       
     } catch (e) {
       consecutiveFailures++;
