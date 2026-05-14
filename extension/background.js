@@ -23,6 +23,7 @@ const DEFAULT_AGENT_MEMORY = {
   voiceRules: '',
   bannedClaims: '',
   interactionTargets: '',
+  discoveryKeywords: '',
   replyStrategy: '',
   sourceInputs: '',
   weeklyReviewSignals: ''
@@ -42,6 +43,7 @@ const AGENT_MEMORY_LABELS = {
   voiceRules: '表达规则',
   bannedClaims: '禁用话术',
   interactionTargets: '优先互动对象',
+  discoveryKeywords: '热帖搜索关键词',
   replyStrategy: '评论引流策略',
   sourceInputs: '日常输入来源',
   weeklyReviewSignals: '复盘指标'
@@ -156,6 +158,14 @@ const DEFAULT_INTERACTION_TARGETS = {
   brand_official: ['OpenAI', 'NotionHQ', 'Linear', 'vercel', 'cursor_ai', 'AnthropicAI']
 };
 
+const DEFAULT_DISCOVERY_KEYWORDS = {
+  ai_product_kol: ['AI工具', 'AI Agent', '提示词', 'AI自动化', 'Cursor', 'Claude', 'ChatGPT'],
+  monetization_global: ['AI副业', '出海', '独立开发', '海外获客', '产品增长', '小产品变现'],
+  indie_builder: ['独立开发', 'Build in Public', 'SaaS', 'MVP', 'Product Hunt', 'Cursor 做产品'],
+  research_growth: ['AI 投资', '产品增长', '市场趋势', '增长框架', '商业模式', '创始人洞察'],
+  brand_official: ['AI产品', '产品发布', '用户案例', '产品更新', '工作流自动化', '效率工具']
+};
+
 function normalizeHandleList(values = []) {
   return values
     .flatMap(value => String(value || '').split(/[\s,，、\n]+/))
@@ -176,6 +186,17 @@ function getDefaultInteractionTargets(context = {}) {
   }
   const playbook = selectGrowthPlaybook(context);
   return DEFAULT_INTERACTION_TARGETS[playbook.id] || DEFAULT_INTERACTION_TARGETS.indie_builder;
+}
+
+function getDefaultDiscoveryKeywords(context = {}) {
+  const explicitArchetype = context.id
+    || context.strategyArchetype
+    || context.onboardingStrategy?.strategyArchetype;
+  if (DEFAULT_DISCOVERY_KEYWORDS[explicitArchetype]) {
+    return DEFAULT_DISCOVERY_KEYWORDS[explicitArchetype];
+  }
+  const playbook = selectGrowthPlaybook(context);
+  return DEFAULT_DISCOVERY_KEYWORDS[playbook.id] || DEFAULT_DISCOVERY_KEYWORDS.indie_builder;
 }
 
 function collectSignalText(...items) {
@@ -1790,6 +1811,7 @@ ${bio || '暂无'}
     "voiceRules": "...",
     "bannedClaims": "...",
     "interactionTargets": "...",
+    "discoveryKeywords": "用于 X 高级搜索的关键词，每行一个，必须匹配目标读者和内容方向",
     "replyStrategy": "...",
     "sourceInputs": "...",
     "weeklyReviewSignals": "..."
@@ -1863,7 +1885,8 @@ ${playbookCatalog}
 3. 第一周内容矩阵：涨粉内容、建信任内容、转化内容、互动钩子内容、人设加深内容。
 4. 评论引流资产：判断用户是否更适合导向产品/工具、高质量帖子/资料，还是暂不设置引流资产。
 5. 自动生成 5-10 个优先互动账号：必须是该策略模板下值得观察/回复的创作者或品牌账号；如果不确定，用模板给出的默认账号池，不要把选择责任交给用户。
-6. 爆款热帖风格：必须生成 3 个候选首帖，并按 6 项 1-10 分打分。
+6. 自动生成 X 高级搜索关键词：用于找到中文/目标语言高互动热帖，避免只依赖推荐页；关键词必须能匹配目标读者、内容方向和评论截流场景。
+7. 爆款热帖风格：必须生成 3 个候选首帖，并按 6 项 1-10 分打分。
 
 评分维度：
 - hook: 开头是否能让人停住
@@ -1927,6 +1950,7 @@ ${playbookCatalog}
     "voiceRules": "...",
     "bannedClaims": "...",
     "interactionTargets": "...",
+    "discoveryKeywords": "用于 X 高级搜索的关键词，每行一个，必须匹配目标读者和内容方向",
     "replyStrategy": "...",
     "sourceInputs": "...",
     "weeklyReviewSignals": "..."
@@ -1970,6 +1994,9 @@ function normalizeOnboardingAnalysis(parsed = {}, sourceInput = '') {
   ]);
   const memory = mergeAgentMemory(DEFAULT_AGENT_MEMORY, parsed.memory || parsed.agentMemory || {});
   memory.interactionTargets = recommendedInteractionTargets;
+  if (!memoryValueToText(memory.discoveryKeywords).trim()) {
+    memory.discoveryKeywords = getDefaultDiscoveryKeywords(fallbackPlaybook).join('\n');
+  }
 
   return {
     sourceInput: parsed.sourceInput || sourceInput,

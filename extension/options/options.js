@@ -23,6 +23,7 @@ const DEFAULT_AGENT_MEMORY = {
   voiceRules: '',
   bannedClaims: '',
   interactionTargets: '',
+  discoveryKeywords: '',
   replyStrategy: '',
   sourceInputs: '',
   weeklyReviewSignals: ''
@@ -66,6 +67,7 @@ const AGENT_MEMORY_FIELD_IDS = {
   voiceRules: 'voiceRules',
   bannedClaims: 'bannedClaims',
   interactionTargets: 'interactionTargets',
+  discoveryKeywords: 'discoveryKeywords',
   replyStrategy: 'replyStrategy',
   sourceInputs: 'sourceInputs',
   weeklyReviewSignals: 'weeklyReviewSignals'
@@ -134,6 +136,14 @@ const DEFAULT_INTERACTION_TARGETS = {
   indie_builder: ['levelsio', 'marckohlbrugge', 'patio11', 'robj3d3', 'dvassallo', 'gregisenberg'],
   research_growth: ['aakashg0', 'lennysan', 'shreyas', 'packyM', 'benthompson', 'stratechery'],
   brand_official: ['OpenAI', 'NotionHQ', 'Linear', 'vercel', 'cursor_ai', 'AnthropicAI']
+};
+
+const DEFAULT_DISCOVERY_KEYWORDS = {
+  ai_product_kol: ['AI工具', 'AI Agent', '提示词', 'AI自动化', 'Cursor', 'Claude', 'ChatGPT'],
+  monetization_global: ['AI副业', '出海', '独立开发', '海外获客', '产品增长', '小产品变现'],
+  indie_builder: ['独立开发', 'Build in Public', 'SaaS', 'MVP', 'Product Hunt', 'Cursor 做产品'],
+  research_growth: ['AI 投资', '产品增长', '市场趋势', '增长框架', '商业模式', '创始人洞察'],
+  brand_official: ['AI产品', '产品发布', '用户案例', '产品更新', '工作流自动化', '效率工具']
 };
 
 const LANGUAGE_LABELS = {
@@ -678,6 +688,7 @@ function syncWizardToFields(options = {}) {
   const firstTweet = strategy.firstTweetText || composeFirstTweet(strategy);
   const sourceTargets = normalizeHandleList([extractSourceHandles(source)]);
   const interactionTargetList = formatHandleList([...sourceTargets, ...getDefaultInteractionTargets(strategy)]);
+  const discoveryKeywords = getDefaultDiscoveryKeywords(strategy).join('\n');
 
   setFieldValue('postsPerDay', String(plan.postsPerDay), overwrite);
   setFieldValue('postScheduleMode', 'smart', overwrite);
@@ -706,6 +717,7 @@ function syncWizardToFields(options = {}) {
     voiceRules: buildVoiceRules(strategy),
     bannedClaims: '禁止“稳赚”“保证涨粉”“保证成交”“内部消息”“无风险收益”等不可验证承诺。',
     interactionTargets: interactionTargetList,
+    discoveryKeywords,
     replyStrategy: buildReplyStrategy(strategy),
     sourceInputs: source,
     weeklyReviewSignals: '每周复盘：涨粉来源、回复率、收藏率、转发率、评论带来的关注、误解或争议点、可复用选题。'
@@ -739,6 +751,11 @@ function formatHandleList(values = []) {
 function getDefaultInteractionTargets(strategy = {}) {
   const archetype = strategy.strategyArchetype || DEFAULT_ONBOARDING_STRATEGY.strategyArchetype;
   return DEFAULT_INTERACTION_TARGETS[archetype] || DEFAULT_INTERACTION_TARGETS.indie_builder;
+}
+
+function getDefaultDiscoveryKeywords(strategy = {}) {
+  const archetype = strategy.strategyArchetype || DEFAULT_ONBOARDING_STRATEGY.strategyArchetype;
+  return DEFAULT_DISCOVERY_KEYWORDS[archetype] || DEFAULT_DISCOVERY_KEYWORDS.indie_builder;
 }
 
 function extractSourceHandles(source) {
@@ -808,7 +825,7 @@ function buildReplyStrategy(strategy) {
     .join('、');
   return `Agent 已自动生成种子互动账号池：${targets || '根据账号定位动态选择'}。
 
-优先回复这些赛道核心创作者和 ${audience} 正在讨论的话题。不要为了被看见而回复，只回复能让原帖变得更完整的内容。
+优先回复这些赛道核心创作者和 ${audience} 正在讨论的话题。推荐页不匹配时，Agent 会自动使用关键词 + X 高级搜索过滤器寻找目标语言热帖，不把推荐页当唯一来源。不要为了被看见而回复，只回复能让原帖变得更完整的内容。
 
 高价值回复三种结构：
 1. 补缺失角度：说出原帖没讲但读者需要的边界。

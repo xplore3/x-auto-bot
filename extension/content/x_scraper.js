@@ -9,12 +9,22 @@ const REPLY_COOLDOWN_MS = 300000; // 5 minutes
 const REPLY_ATTEMPT_LOCK_MS = 60000; // short lock while the automator tries to send
 const MAX_LOGS = 50;
 const MIN_REPLY_OPPORTUNITY_SCORE = 58;
+const SEARCH_DISCOVERY_MIN_INTERVAL_MS = 90 * 1000;
+const SEARCH_DISCOVERY_ROTATE_INTERVAL_MS = 2 * 60 * 1000;
+const SEARCH_DISCOVERY_LOOKBACK_DAYS = 7;
 const DEFAULT_INTERACTION_TARGETS = {
   ai_product_kol: ['zarazhangrui', 'swyx', 'aakashg0', 'lennysan', 'kfk_ai', 'karpathy', 'sama'],
   monetization_global: ['Leobai825', 'levelsio', 'dvassallo', 'codie_sanchez', 'naval', 'gregisenberg'],
   indie_builder: ['levelsio', 'marckohlbrugge', 'patio11', 'robj3d3', 'dvassallo', 'gregisenberg'],
   research_growth: ['aakashg0', 'lennysan', 'shreyas', 'packyM', 'benthompson', 'stratechery'],
   brand_official: ['OpenAI', 'NotionHQ', 'Linear', 'vercel', 'cursor_ai', 'AnthropicAI']
+};
+const DEFAULT_DISCOVERY_KEYWORDS = {
+  ai_product_kol: ['AI工具', 'AI Agent', '提示词', 'AI自动化', 'Cursor', 'Claude', 'ChatGPT'],
+  monetization_global: ['AI副业', '出海', '独立开发', '海外获客', '产品增长', '小产品变现'],
+  indie_builder: ['独立开发', 'Build in Public', 'SaaS', 'MVP', 'Product Hunt', 'Cursor 做产品'],
+  research_growth: ['AI 投资', '产品增长', '市场趋势', '增长框架', '商业模式', '创始人洞察'],
+  brand_official: ['AI产品', '产品发布', '用户案例', '产品更新', '工作流自动化', '效率工具']
 };
 
 // ==========================================
@@ -446,6 +456,10 @@ function getDefaultInteractionTargets(state = {}) {
   return DEFAULT_INTERACTION_TARGETS[inferStrategyArchetype(state)] || DEFAULT_INTERACTION_TARGETS.ai_product_kol;
 }
 
+function getDefaultDiscoveryKeywords(state = {}) {
+  return DEFAULT_DISCOVERY_KEYWORDS[inferStrategyArchetype(state)] || DEFAULT_DISCOVERY_KEYWORDS.indie_builder;
+}
+
 function collectTargetHandles(state = {}) {
   const memory = state.agentMemory || {};
   return [...new Set([
@@ -453,6 +467,151 @@ function collectTargetHandles(state = {}) {
     ...parseTargetHandles(memory.interactionTargets),
     ...parseTargetHandles(getDefaultInteractionTargets(state).join('\n'))
   ])];
+}
+
+function parseDiscoveryKeywords(text = '') {
+  return String(text || '')
+    .split(/[\n,，、]+/)
+    .map(item => item.trim())
+    .filter(item => item.length >= 2 && item.length <= 80);
+}
+
+function collectDiscoveryKeywords(state = {}) {
+  const memory = state.agentMemory || {};
+  return [...new Set([
+    ...parseDiscoveryKeywords(memory.discoveryKeywords),
+    ...getDefaultDiscoveryKeywords(state)
+  ])].slice(0, 12);
+}
+
+function getSearchLanguageOperator(state = {}) {
+  const lang = state.onboardingStrategy?.preferredLanguage || 'zh-CN';
+  if (lang === 'en') return 'lang:en';
+  if (lang === 'ja') return 'lang:ja';
+  if (lang === 'ko') return 'lang:ko';
+  return 'lang:zh';
+}
+
+function getSearchThresholds(state = {}) {
+  const lang = state.onboardingStrategy?.preferredLanguage || 'zh-CN';
+  const isChinese = lang === 'zh-CN' || lang === 'zh-TW';
+  return isChinese
+    ? { minFaves: 50, minRetweets: 5 }
+    : { minFaves: 120, minRetweets: 15 };
+}
+
+function getRecentSinceDate(days = SEARCH_DISCOVERY_LOOKBACK_DAYS) {
+  const d = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  return d.toISOString().slice(0, 10);
+}
+
+function quoteSearchTerm(term = '') {
+  const clean = String(term || '').trim().replace(/"/g, '');
+  if (!clean) return '';
+  if (isAdvancedSearchQuery(clean)) {
+    return clean;
+  }
+  return /\s/.test(clean) ? `"${clean}"` : clean;
+}
+
+function isAdvancedSearchQuery(value = '') {
+  return /\b(min_faves|min_retweets|from|lang|filter|since|until):|\bOR\b/i.test(String(value || ''));
+}
+
+function getNegativeSearchOperators(state = {}) {
+  const memory = state.agentMemory || {};
+  const signal = [
+    state.onboardingStrategy?.strategyArchetype,
+    state.onboardingStrategy?.sourceInput,
+    memory.marketPosition,
+    memory.contentPillars,
+    memory.contentAngles,
+    memory.coreOpinions
+  ].join('\n').toLowerCase();
+  if (/web3|crypto|defi|nft|blockchain|token|链上|加密|币圈/.test(signal)) return '';
+  return '-web3 -crypto -defi -nft -airdrop -token -btc -eth';
+}
+
+function buildDiscoverySearchQueries(state = {}) {
+  const keywords = collectDiscoveryKeywords(state);
+  const lang = getSearchLanguageOperator(state);
+  const { minFaves, minRetweets } = getSearchThresholds(state);
+  const since = getRecentSinceDate();
+  const negative = getNegativeSearchOperators(state);
+  const topicQueries = keywords
+    .map(keyword => {
+      const term = quoteSearchTerm(keyword);
+      if (!term) return '';
+      if (isAdvancedSearchQuery(term)) {
+        const langPart = /\blang:/i.test(term) ? '' : lang;
+        const sincePart = /\bsince:/i.test(term) ? '' : `since:${since}`;
+        return `${term} ${langPart} -filter:replies ${sincePart} ${negative}`.trim();
+      }
+      return `${term} ${lang} min_faves:${minFaves} min_retweets:${minRetweets} -filter:replies since:${since} ${negative}`.trim();
+    })
+    .filter(Boolean);
+  const accountQueries = collectTargetHandles(state)
+    .slice(0, 6)
+    .map(handle => `from:${handle} ${lang} min_faves:${minFaves} -filter:replies since:${since} ${negative}`.trim());
+  return [...new Set([...topicQueries, ...accountQueries])].slice(0, 18);
+}
+
+function isSearchPage() {
+  return window.location.pathname === '/search';
+}
+
+function getCurrentSearchQuery() {
+  try {
+    return new URL(window.location.href).searchParams.get('q') || '';
+  } catch (error) {
+    return '';
+  }
+}
+
+function hasOpenEditorText() {
+  const editors = Array.from(document.querySelectorAll('[role="textbox"][contenteditable="true"], div[data-testid="tweetTextarea_0"]'));
+  return editors.some(editor => (editor.innerText || editor.textContent || '').trim().length > 0);
+}
+
+function isDiscoveryNavigationUnsafe(state = {}) {
+  const pathname = window.location.pathname || '';
+  if (/^\/intent\//.test(pathname) || pathname.includes('/compose/')) return true;
+  if (state.pendingReply || state.pendingPost) return true;
+  return hasOpenEditorText();
+}
+
+function maybeNavigateToDiscoverySearch(state = {}, reason = '当前页面没有匹配候选') {
+  if (isDiscoveryNavigationUnsafe(state)) {
+    addLog('info', '检测到未完成编辑器，暂不切换关键词搜索页');
+    return false;
+  }
+
+  const queries = buildDiscoverySearchQueries(state);
+  if (queries.length === 0) return false;
+
+  const now = Date.now();
+  const lastSearchAt = Number(state.lastDiscoverySearchAt) || 0;
+  const minInterval = isSearchPage() ? SEARCH_DISCOVERY_ROTATE_INTERVAL_MS : SEARCH_DISCOVERY_MIN_INTERVAL_MS;
+  if (lastSearchAt && now - lastSearchAt < minInterval) return false;
+
+  const currentQuery = getCurrentSearchQuery();
+  let nextIndex = Number(state.discoverySearchIndex) || 0;
+  if (isSearchPage() && currentQuery) {
+    const currentIndex = queries.findIndex(query => query === currentQuery);
+    if (currentIndex >= 0) nextIndex = currentIndex + 1;
+  }
+  const query = queries[nextIndex % queries.length];
+  const url = `https://x.com/search?q=${encodeURIComponent(query)}&src=typed_query&f=top`;
+
+  chrome.storage.local.set({
+    lastDiscoverySearchAt: now,
+    discoverySearchIndex: (nextIndex + 1) % queries.length,
+    currentDiscoveryQuery: query,
+    currentDiscoveryReason: reason
+  });
+  addLog('info', `切换到关键词热帖搜索：${query}`);
+  window.location.assign(url);
+  return true;
 }
 
 function isSensitiveReplyTarget(text = '') {
@@ -685,7 +844,12 @@ function scrapeTweets() {
   if (Date.now() < twitterCooldownUntil) return;
   if (Date.now() < apiCooldownUntil) return;
 
-  chrome.storage.local.get(['isRunning', 'isAutoPaused', 'aiPersona', 'agentMemory', 'competitorReport', 'twitterCooldownUntil', 'apiCooldownUntil', 'onboardingStrategy', 'targetUsers'], (result) => {
+  chrome.storage.local.get([
+    'isRunning', 'isAutoPaused', 'aiPersona', 'agentMemory', 'competitorReport',
+    'twitterCooldownUntil', 'apiCooldownUntil', 'onboardingStrategy', 'targetUsers',
+    'pendingReply', 'pendingPost', 'lastDiscoverySearchAt', 'discoverySearchIndex',
+    'currentDiscoveryQuery'
+  ], (result) => {
     if (!result.isRunning) return;
     if (result.isAutoPaused) {
       addLog('info', '自动操作已暂停，跳过推文抓取');
@@ -701,7 +865,10 @@ function scrapeTweets() {
     if (!hasPersona || !result.competitorReport) return;
     
     const articles = document.querySelectorAll('article[data-testid="tweet"]');
-    if (articles.length === 0) return;
+    if (articles.length === 0) {
+      maybeNavigateToDiscoverySearch(result, '当前页面没有可读推文');
+      return;
+    }
 
     const candidates = [];
     for (const article of articles) {
@@ -740,7 +907,10 @@ function scrapeTweets() {
       candidates.push({ article, author, text, tweetStatus, tweetId, opportunity });
     }
 
-    if (candidates.length === 0) return;
+    if (candidates.length === 0) {
+      maybeNavigateToDiscoverySearch(result, '当前页面没有高价值互动候选');
+      return;
+    }
 
     candidates.sort((a, b) => b.opportunity.score - a.opportunity.score);
     const selected = candidates[0];
@@ -1010,6 +1180,10 @@ function renderWidget() {
     statusClass = 'active';
   } else if (botState.isGenerating) {
     focusStatus = '正在生成 Agent 内容队列';
+    statusClass = 'active';
+  } else if (replySuggestionEnabled && botState.currentDiscoveryQuery) {
+    const query = String(botState.currentDiscoveryQuery).replace(/\s+/g, ' ').slice(0, 48);
+    focusStatus = `关键词热帖搜索：${query}`;
     statusClass = 'active';
   } else if (profileFailed && isPersonaEmpty) {
     focusStatus = '简介读取失败：请在长期记忆中心手动填写人设';
