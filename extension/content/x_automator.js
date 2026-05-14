@@ -306,11 +306,21 @@ async function closeOpenComposerBeforeNavigation(reason = '页面跳转') {
   return !remainingEditor || !remainingText;
 }
 
-async function safeNavigateTo(url, reason = '页面跳转') {
+async function safeNavigateTo(url, reason = '页面跳转', options = {}) {
   if (!url) return false;
   if (window.location.href === url) return true;
   const closed = await closeOpenComposerBeforeNavigation(reason);
   if (!closed) {
+    if (options.openCleanTabOnBlocked) {
+      const response = await runtimeMessage({ action: 'openAutomationTab', url, reason }).catch(error => ({
+        success: false,
+        error: error.message
+      }));
+      if (response?.success) {
+        addLog('warn', `${reason} 前无法自动关闭当前未保存编辑器，已改用新的干净 X 标签页继续`);
+        return true;
+      }
+    }
     pauseAutomation(`${reason} 前无法自动关闭未保存编辑器，已暂停以避免浏览器离站确认弹窗`);
     return false;
   }
@@ -365,7 +375,7 @@ function getDuplicateSendSignal() {
 }
 
 function hasSendSuccessSignal() {
-  return /Your (post|tweet|reply) was sent|Your post has been sent|Your Tweet has been sent|Post sent|Tweet sent|Reply sent|你的帖子已发送|你的回复已发送|帖子已发送|回复已发送|已发送你的帖子|已发送你的回复/i.test(getPageText());
+  return /Your (post|tweet|reply) was sent|Your post has been sent|Your Tweet has been sent|Post sent|Tweet sent|Reply sent|Post scheduled|Tweet scheduled|Your post was scheduled|Your Tweet was scheduled|你的帖子已发送|你的回复已发送|帖子已发送|回复已发送|已发送你的帖子|已发送你的回复|帖子已定时|推文已定时|已定时发送|已安排发送|已预定发布/i.test(getPageText());
 }
 
 async function waitForElement(getter, timeout = 8000, interval = 250) {
@@ -1024,7 +1034,7 @@ async function handlePendingPost() {
 
       if (!window.location.pathname.includes('/intent/post')) {
         addLog('info', '使用 X intent/post 预填推文，避免中文输入法污染');
-        await safeNavigateTo(getIntentPostUrl(postText), '打开 X intent/post 发帖页');
+        await safeNavigateTo(getIntentPostUrl(postText), '打开 X intent/post 发帖页', { openCleanTabOnBlocked: true });
         return;
       }
 

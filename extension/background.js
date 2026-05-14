@@ -385,21 +385,40 @@ function normalizeGeneratedTweets(parsed) {
     .sort((a, b) => b.score - a.score);
 }
 
+function hashString(value = '') {
+  let hash = 5381;
+  const text = String(value || '');
+  for (let i = 0; i < text.length; i++) {
+    hash = ((hash << 5) + hash) + text.charCodeAt(i);
+    hash >>>= 0;
+  }
+  return hash.toString(36);
+}
+
+function hasQueueId(value) {
+  return value !== null && value !== undefined && String(value) !== '';
+}
+
+function buildDraftId(text, index) {
+  return `draft-${hashString(text)}-${index}`;
+}
+
 function normalizeDraftQueue(queue = []) {
   const rawItems = Array.isArray(queue) ? queue : [];
   return rawItems
-    .map((item) => {
+    .map((item, index) => {
       const rawText = typeof item === 'string' ? item : item?.text;
       const text = formatTweetForX(rawText);
       if (!text) return null;
       const scores = scoreObject(item?.scores || {});
       const storedScore = Number(item?.viralScore);
       const scheduledAt = Number(item?.scheduledAt);
-      const nativeScheduleStatus = ['queued', 'scheduled', 'failed'].includes(item?.nativeScheduleStatus)
+      const nativeScheduleStatus = ['queued', 'scheduling', 'scheduled', 'failed'].includes(item?.nativeScheduleStatus)
         ? item.nativeScheduleStatus
         : '';
+      const existingId = typeof item === 'object' && item ? item.id : null;
       return {
-        id: typeof item === 'object' && item ? item.id ?? null : null,
+        id: hasQueueId(existingId) ? existingId : buildDraftId(text, index),
         text,
         type: typeof item === 'object' && item ? memoryValueToText(item.type || 'unknown') : 'legacy',
         viralScore: Number.isFinite(storedScore) ? storedScore : totalViralScore(scores),
@@ -410,6 +429,44 @@ function normalizeDraftQueue(queue = []) {
     })
     .filter(Boolean)
     .slice(0, DRAFT_TARGET_COUNT);
+}
+
+function findQueueItemIndex(queue = [], pendingPostId, pendingPostText) {
+  const normalized = normalizeDraftQueue(queue);
+  if (hasQueueId(pendingPostId)) {
+    const byId = normalized.findIndex(item => String(item.id) === String(pendingPostId));
+    if (byId >= 0) return byId;
+  }
+
+  const expectedText = formatTweetForX(pendingPostText || '');
+  if (!expectedText) return -1;
+  return normalized.findIndex(item => item.text === expectedText);
+}
+
+function removeCompletedQueueItem(queue = [], pendingPostId, pendingPostText) {
+  const normalized = normalizeDraftQueue(queue);
+  const index = findQueueItemIndex(normalized, pendingPostId, pendingPostText);
+  if (index < 0) return normalized;
+  return normalized.filter((_, itemIndex) => itemIndex !== index);
+}
+
+function updateQueueItem(queue = [], pendingPostId, pendingPostText, patch = {}) {
+  const normalized = normalizeDraftQueue(queue);
+  const index = findQueueItemIndex(normalized, pendingPostId, pendingPostText);
+  if (index < 0) return normalized;
+  return normalized.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item);
+}
+
+function queueNeedsNormalization(rawQueue, normalizedQueue) {
+  if (!Array.isArray(rawQueue)) return false;
+  if (rawQueue.length !== normalizedQueue.length) return true;
+  return rawQueue.some((item, index) => {
+    const normalized = normalizedQueue[index];
+    if (!normalized) return true;
+    if (!item || typeof item !== 'object') return true;
+    if (!hasQueueId(item.id)) return true;
+    return formatTweetForX(item.text) !== normalized.text;
+  });
 }
 
 function addLog(level, message) {
@@ -539,6 +596,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         addLog('warn', `真实点击失败，回退 DOM 点击: ${error.message}`);
         sendResponse({ success: false, error: error.message });
       });
+    return true;
+  } else if (request.action === "openAutomationTab") {
+    const url = request.url || '';
+    if (!/^https:\/\/(x|twitter)\.com\//.test(url)) {
+      sendResponse({ success: false, error: '只能打开 X/Twitter 自动化页面' });
+      return false;
+    }
+    chrome.tabs.create({ url, active: true }, (tab) => {
+      addLog('info', `当前 X 页面无法安全跳转，已新开干净自动化标签页 ${tab.id}`);
+      sendResponse({ success: true, tabId: tab.id });
+    });
     return true;
   } else if (request.action === "queueUpdated") {
     checkAndSetupAlarm();
@@ -1141,13 +1209,17 @@ function scheduleNativeQueue() {
     }
 
     let queue = ensureNativeScheduleTimes(result.tweetQueue, result);
-    const nextTweet = queue.find(item => item.nativeScheduleStatus !== 'scheduled');
+    const nextTweet = queue.find(item => !['scheduled', 'failed'].includes(item.nativeScheduleStatus));
     if (!nextTweet) {
-      chrome.storage.local.set({ tweetQueue: queue, nextPostTime: 'X 定时发布已全部写入' });
+      const failedCount = queue.filter(item => item.nativeScheduleStatus === 'failed').length;
+      chrome.storage.local.set({
+        tweetQueue: queue,
+        nextPostTime: failedCount > 0 ? `X 定时发布有 ${failedCount} 条失败，等待人工处理` : 'X 定时发布已全部写入'
+      });
       return;
     }
 
-    queue = queue.map(item => item.id === nextTweet.id ? { ...item, nativeScheduleStatus: 'queued' } : item);
+    queue = updateQueueItem(queue, nextTweet.id, nextTweet.text, { nativeScheduleStatus: 'scheduling' });
     chrome.storage.local.set({
       tweetQueue: queue,
       pendingPost: nextTweet.text,
@@ -1241,8 +1313,8 @@ function triggerPostInTab() {
         addLog('info', `向标签页 ${tab.id} 发送发推指令`);
         chrome.tabs.sendMessage(tab.id, { action: "postNewTweet" }, () => {
           if (chrome.runtime.lastError) {
-            addLog('warn', `标签页未响应内容脚本，改用 intent/post 导航: ${chrome.runtime.lastError.message}`);
-            chrome.tabs.update(tab.id, { url: intentUrl });
+            addLog('warn', `标签页未响应内容脚本，改开干净 intent/post 标签页: ${chrome.runtime.lastError.message}`);
+            chrome.tabs.create({ url: intentUrl, active: true });
           }
         });
       } else {
@@ -1272,15 +1344,11 @@ function handlePostCompleted(source) {
       updates.postsToday = postsToday + 1;
       updates.lastPostDate = todayStr;
       const queue = normalizeDraftQueue(result.tweetQueue);
-      if (result.pendingPostId !== null && result.pendingPostId !== undefined) {
-        updates.tweetQueue = queue.filter(item => item.id !== result.pendingPostId);
-      } else if (queue[0] && queue[0].text === result.pendingPost) {
-        updates.tweetQueue = queue.slice(1);
-      }
+      updates.tweetQueue = removeCompletedQueueItem(queue, result.pendingPostId, result.pendingPost);
       addLog('success', `队列推文发送成功，今日已发 ${updates.postsToday} 条`);
     } else if (source === POST_DELIVERY_MODE_X_SCHEDULE) {
       const queue = normalizeDraftQueue(result.tweetQueue);
-      updates.tweetQueue = queue.filter(item => item.id !== result.pendingPostId);
+      updates.tweetQueue = removeCompletedQueueItem(queue, result.pendingPostId, result.pendingPost);
       updates.nativeScheduledCount = (Number(result.nativeScheduledCount) || 0) + 1;
       addLog('success', `X 原生定时发布写入成功，剩余 ${updates.tweetQueue.length} 条待处理`);
     } else {
@@ -1842,7 +1910,7 @@ async function generateAutoDrafts() {
     }
     const rawQueue = Array.isArray(config.tweetQueue) ? config.tweetQueue : [];
     let queue = normalizeDraftQueue(rawQueue);
-    if (queue.length !== rawQueue.length) {
+    if (queueNeedsNormalization(rawQueue, queue)) {
       chrome.storage.local.set({ tweetQueue: queue });
     }
     if (queue.length >= DRAFT_TARGET_COUNT) return;
@@ -2015,7 +2083,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     if (changes.tweetQueue) {
        chrome.storage.local.get(['aiPersona'], (res) => {
           const queue = normalizeDraftQueue(changes.tweetQueue.newValue);
-          if (queue.length !== (Array.isArray(changes.tweetQueue.newValue) ? changes.tweetQueue.newValue.length : 0)) {
+          if (queueNeedsNormalization(changes.tweetQueue.newValue, queue)) {
              chrome.storage.local.set({ tweetQueue: queue });
              return;
           }
