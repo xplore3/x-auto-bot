@@ -219,6 +219,25 @@ function findComposeButton(scope = document) {
     || findButtonByText(root, [/^post$/i, /^tweet$/i, /发帖|发布/]);
 }
 
+function findCloseDialogButton(scope = document) {
+  const root = scope || document;
+  return root.querySelector('[data-testid="app-bar-close"]')
+    || root.querySelector('button[aria-label*="Close"]')
+    || root.querySelector('button[aria-label*="关闭"]')
+    || root.querySelector('button[aria-label*="Back"]')
+    || root.querySelector('button[aria-label*="返回"]')
+    || findButtonByText(root, [/^close$/i, /^back$/i, /^关闭$/, /^返回$/]);
+}
+
+function findDiscardDraftButton(scope = document) {
+  return findButtonByText(scope, [
+    /^discard$/i,
+    /discard (post|tweet|draft)/i,
+    /^delete$/i,
+    /放弃|舍弃|丢弃|删除草稿|删除帖子|删除推文/
+  ]);
+}
+
 function parseDraftCountFromText(text = '') {
   const patterns = [
     /Drafts?\s*\(?\s*(\d+)\s*\)?/i,
@@ -254,15 +273,49 @@ async function closeTopDialogIfSafe() {
   if (!dialog) return;
   const editor = findTweetEditor(dialog);
   if (editor && getEditorText(editor)) return;
-  const closeButton = dialog.querySelector('[data-testid="app-bar-close"]')
-    || dialog.querySelector('button[aria-label*="Close"]')
-    || dialog.querySelector('button[aria-label*="关闭"]')
-    || dialog.querySelector('button[aria-label*="Back"]')
-    || dialog.querySelector('button[aria-label*="返回"]');
+  const closeButton = findCloseDialogButton(dialog);
   if (closeButton) {
     simulateRealClick(closeButton);
     await sleep(500);
   }
+}
+
+async function closeOpenComposerBeforeNavigation(reason = '页面跳转') {
+  const dialog = findActiveDialog();
+  const editor = dialog ? findTweetEditor(dialog) : findTweetEditor(document);
+  if (!dialog && !editor) return true;
+
+  const textBeforeClose = getEditorText(editor);
+  const closeButton = dialog ? findCloseDialogButton(dialog) : findCloseDialogButton(document);
+  if (!closeButton) {
+    return !textBeforeClose;
+  }
+
+  addLog('info', `${reason} 前检测到未发送编辑器，先关闭并丢弃当前草稿`);
+  simulateRealClick(closeButton);
+  await sleep(800);
+
+  const discardButton = await waitForElement(() => findDiscardDraftButton(document), textBeforeClose ? 4000 : 1200, 250);
+  if (discardButton) {
+    simulateRealClick(discardButton);
+    await sleep(1000);
+  }
+
+  const remainingEditor = findTweetEditor(document);
+  const remainingText = getEditorText(remainingEditor);
+  return !remainingEditor || !remainingText;
+}
+
+async function safeNavigateTo(url, reason = '页面跳转') {
+  if (!url) return false;
+  if (window.location.href === url) return true;
+  const closed = await closeOpenComposerBeforeNavigation(reason);
+  if (!closed) {
+    pauseAutomation(`${reason} 前无法自动关闭未保存编辑器，已暂停以避免浏览器离站确认弹窗`);
+    return false;
+  }
+  window.location.assign(url);
+  return true;
 }
 
 function getButtonDisabledReason(button) {
@@ -348,6 +401,12 @@ function isLoggedOutOrBlocked() {
 async function startIntentReplyFlow({ statusId, replyText, tweetAuthor, tweetContent, reason }) {
   if (!statusId) return false;
   addLog('info', `${reason || '开始 X 官方 intent 回复'}，打开官方回复页`);
+  const targetUrl = getIntentReplyUrl(statusId, replyText);
+  const canNavigate = await closeOpenComposerBeforeNavigation('打开 X 官方 intent 回复页');
+  if (!canNavigate) {
+    pauseAutomation('打开 X 官方 intent 回复页前无法关闭当前未发送编辑器，已暂停以避免浏览器离站确认弹窗');
+    return false;
+  }
   await setLocalStorage({
     pendingReply: {
       statusId,
@@ -360,7 +419,7 @@ async function startIntentReplyFlow({ statusId, replyText, tweetAuthor, tweetCon
     isAutoPaused: false,
     pauseReason: ''
   });
-  window.location.assign(getIntentReplyUrl(statusId, replyText));
+  window.location.assign(targetUrl);
   setTimeout(() => {
     isAutomatorBusy = false;
     handlePendingReply();
@@ -832,7 +891,7 @@ async function handlePendingReply() {
         && (window.location.search.includes('in_reply_to') || window.location.search.includes(pending.statusId));
       if (!isReplyIntentPage) {
         addLog('info', '打开 X 官方 intent 回复页');
-        window.location.assign(getIntentReplyUrl(pending.statusId, pending.replyText));
+        await safeNavigateTo(getIntentReplyUrl(pending.statusId, pending.replyText), '打开 X 官方 intent 回复页');
         return;
       }
 
@@ -909,6 +968,9 @@ async function handlePendingReply() {
 
       consecutiveFailures = 0;
       await removeLocalStorage(['pendingReply']);
+      if (outcome.status === 'duplicate') {
+        await closeOpenComposerBeforeNavigation('清理重复回复编辑器');
+      }
       addLog('success', outcome.status === 'duplicate'
         ? `X 提示已回复过 @${pending.tweetAuthor || '未知用户'}，已按完成处理：${outcome.reason}`
         : `已通过 X 官方 intent 回复 @${pending.tweetAuthor || '未知用户'}：${outcome.reason}`);
@@ -962,7 +1024,7 @@ async function handlePendingPost() {
 
       if (!window.location.pathname.includes('/intent/post')) {
         addLog('info', '使用 X intent/post 预填推文，避免中文输入法污染');
-        window.location.assign(getIntentPostUrl(postText));
+        await safeNavigateTo(getIntentPostUrl(postText), '打开 X intent/post 发帖页');
         return;
       }
 
@@ -989,6 +1051,7 @@ async function handlePendingPost() {
       if (duplicateBeforeClick) {
         consecutiveFailures = 0;
         addLog('success', `X 提示这条内容已发布过，已消费当前待发任务：${duplicateBeforeClick}`);
+        await closeOpenComposerBeforeNavigation('清理重复发布编辑器');
         notifyPostCompleted(result.pendingPostSource || 'queue');
         return;
       }
@@ -1054,6 +1117,9 @@ async function handlePendingPost() {
       addLog('success', outcome.status === 'duplicate'
         ? `X 提示这条内容已发布过，已消费当前待发任务：${outcome.reason}`
         : (isManualTest ? `测试推文发送成功！${outcome.reason}` : (isNativeSchedule ? `X 原生定时发布创建成功！${outcome.reason}` : `定时推文发送成功！${outcome.reason}`)));
+      if (outcome.status === 'duplicate') {
+        await closeOpenComposerBeforeNavigation('清理重复发布编辑器');
+      }
       notifyPostCompleted(result.pendingPostSource || 'queue');
       
     } catch (e) {
@@ -1084,7 +1150,10 @@ async function readXOfficialDraftCount() {
       if (composeBtn) {
         simulateRealClick(composeBtn);
       } else {
-        window.location.assign('https://x.com/compose/post');
+        const opened = await safeNavigateTo('https://x.com/compose/post', '打开 X compose 读取草稿');
+        if (!opened) {
+          throw new Error('打开 X compose 读取草稿前无法关闭当前未发送编辑器');
+        }
       }
       await sleep(1800);
     }
