@@ -131,11 +131,11 @@ const STRATEGY_ARCHETYPE_LABELS = {
 };
 
 const DEFAULT_INTERACTION_TARGETS = {
-  ai_product_kol: ['zarazhangrui', 'swyx', 'aakashg0', 'lennysan', 'kfk_ai', 'karpathy', 'sama'],
+  ai_product_kol: ['zarazhangrui', 'Leobai825', 'swyx', 'aakashg0', 'lennysan', 'kfk_ai', 'karpathy', 'sama'],
   monetization_global: ['Leobai825', 'levelsio', 'dvassallo', 'codie_sanchez', 'naval', 'gregisenberg'],
   indie_builder: ['levelsio', 'marckohlbrugge', 'patio11', 'robj3d3', 'dvassallo', 'gregisenberg'],
   research_growth: ['aakashg0', 'lennysan', 'shreyas', 'packyM', 'benthompson', 'stratechery'],
-  brand_official: ['OpenAI', 'NotionHQ', 'Linear', 'vercel', 'cursor_ai', 'AnthropicAI']
+  brand_official: ['lennysan', 'shreyas', 'swyx', 'aakashg0', 'gregisenberg', 'patio11', 'levelsio']
 };
 
 const DEFAULT_DISCOVERY_KEYWORDS = {
@@ -686,8 +686,7 @@ function syncWizardToFields(options = {}) {
   const language = LANGUAGE_LABELS[strategy.preferredLanguage] || LANGUAGE_LABELS['zh-CN'];
   const source = strategy.sourceInput || '尚未输入来源';
   const firstTweet = strategy.firstTweetText || composeFirstTweet(strategy);
-  const sourceTargets = normalizeHandleList([extractSourceHandles(source)]);
-  const interactionTargetList = formatHandleList([...sourceTargets, ...getDefaultInteractionTargets(strategy)]);
+  const interactionTargetList = formatHandleList(getDefaultInteractionTargets(strategy));
   const discoveryKeywords = getDefaultDiscoveryKeywords(strategy).join('\n');
 
   setFieldValue('postsPerDay', String(plan.postsPerDay), overwrite);

@@ -151,12 +151,17 @@ const GROWTH_PLAYBOOKS = {
 };
 
 const DEFAULT_INTERACTION_TARGETS = {
-  ai_product_kol: ['zarazhangrui', 'swyx', 'aakashg0', 'lennysan', 'kfk_ai', 'karpathy', 'sama'],
+  ai_product_kol: ['zarazhangrui', 'Leobai825', 'swyx', 'aakashg0', 'lennysan', 'kfk_ai', 'karpathy', 'sama'],
   monetization_global: ['Leobai825', 'levelsio', 'dvassallo', 'codie_sanchez', 'naval', 'gregisenberg'],
   indie_builder: ['levelsio', 'marckohlbrugge', 'patio11', 'robj3d3', 'dvassallo', 'gregisenberg'],
   research_growth: ['aakashg0', 'lennysan', 'shreyas', 'packyM', 'benthompson', 'stratechery'],
-  brand_official: ['OpenAI', 'NotionHQ', 'Linear', 'vercel', 'cursor_ai', 'AnthropicAI']
+  brand_official: ['lennysan', 'shreyas', 'swyx', 'aakashg0', 'gregisenberg', 'patio11', 'levelsio']
 };
+
+const PROJECT_ACCOUNT_HANDLES = new Set([
+  'openai', 'anthropicai', 'cursor_ai', 'vercel', 'linear', 'notionhq', 'github',
+  'baseapp', 'stripe', 'figma', 'perplexity_ai', 'huggingface', 'producthunt'
+]);
 
 const DEFAULT_DISCOVERY_KEYWORDS = {
   ai_product_kol: ['AI工具', 'AI Agent', '提示词', 'AI自动化', 'Cursor', 'Claude', 'ChatGPT'],
@@ -175,6 +180,12 @@ function normalizeHandleList(values = []) {
 
 function formatHandleList(values = []) {
   return [...new Set(normalizeHandleList(values))].join('\n');
+}
+
+function formatPersonalHandleList(values = []) {
+  return [...new Set(normalizeHandleList(values))]
+    .filter(handle => !PROJECT_ACCOUNT_HANDLES.has(handle.toLowerCase()))
+    .join('\n');
 }
 
 function getDefaultInteractionTargets(context = {}) {
@@ -1884,7 +1895,7 @@ ${playbookCatalog}
 2. 目标用户为什么会关注：情绪价值、工具价值、行业内幕、身份认同、可复制方法中的哪几个。
 3. 第一周内容矩阵：涨粉内容、建信任内容、转化内容、互动钩子内容、人设加深内容。
 4. 评论引流资产：判断用户是否更适合导向产品/工具、高质量帖子/资料，还是暂不设置引流资产。
-5. 自动生成 5-10 个优先互动账号：必须是该策略模板下值得观察/回复的创作者或品牌账号；如果不确定，用模板给出的默认账号池，不要把选择责任交给用户。
+5. 自动生成 5-10 个优先互动账号：优先 KOL、创作者、创始人、研究者等个人账号；不要把项目方、品牌官方号、公司号作为主要评论对象。如果不确定，用模板给出的默认个人账号池，不要把选择责任交给用户。
 6. 自动生成 X 高级搜索关键词：用于找到中文/目标语言高互动热帖，避免只依赖推荐页；关键词必须能匹配目标读者、内容方向和评论截流场景。
 7. 爆款热帖风格：必须生成 3 个候选首帖，并按 6 项 1-10 分打分。
 
@@ -1987,7 +1998,7 @@ function normalizeOnboardingAnalysis(parsed = {}, sourceInput = '') {
     agentMemory: parsed.memory || parsed.agentMemory,
     sourceInput
   });
-  const recommendedInteractionTargets = formatHandleList([
+  const recommendedInteractionTargets = formatPersonalHandleList([
     parsed.recommendedInteractionTargets,
     parsed.interactionTargets,
     getDefaultInteractionTargets(fallbackPlaybook)

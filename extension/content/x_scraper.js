@@ -12,13 +12,18 @@ const MIN_REPLY_OPPORTUNITY_SCORE = 58;
 const SEARCH_DISCOVERY_MIN_INTERVAL_MS = 90 * 1000;
 const SEARCH_DISCOVERY_ROTATE_INTERVAL_MS = 2 * 60 * 1000;
 const SEARCH_DISCOVERY_LOOKBACK_DAYS = 7;
+const SURFACE_NAVIGATION_MIN_INTERVAL_MS = 60 * 1000;
 const DEFAULT_INTERACTION_TARGETS = {
-  ai_product_kol: ['zarazhangrui', 'swyx', 'aakashg0', 'lennysan', 'kfk_ai', 'karpathy', 'sama'],
+  ai_product_kol: ['zarazhangrui', 'Leobai825', 'swyx', 'aakashg0', 'lennysan', 'kfk_ai', 'karpathy', 'sama'],
   monetization_global: ['Leobai825', 'levelsio', 'dvassallo', 'codie_sanchez', 'naval', 'gregisenberg'],
   indie_builder: ['levelsio', 'marckohlbrugge', 'patio11', 'robj3d3', 'dvassallo', 'gregisenberg'],
   research_growth: ['aakashg0', 'lennysan', 'shreyas', 'packyM', 'benthompson', 'stratechery'],
-  brand_official: ['OpenAI', 'NotionHQ', 'Linear', 'vercel', 'cursor_ai', 'AnthropicAI']
+  brand_official: ['lennysan', 'shreyas', 'swyx', 'aakashg0', 'gregisenberg', 'patio11', 'levelsio']
 };
+const PROJECT_ACCOUNT_HANDLES = new Set([
+  'openai', 'anthropicai', 'cursor_ai', 'vercel', 'linear', 'notionhq', 'github',
+  'baseapp', 'stripe', 'figma', 'perplexity_ai', 'huggingface', 'producthunt'
+]);
 const DEFAULT_DISCOVERY_KEYWORDS = {
   ai_product_kol: ['AI工具', 'AI Agent', '提示词', 'AI自动化', 'Cursor', 'Claude', 'ChatGPT'],
   monetization_global: ['AI副业', '出海', '独立开发', '海外获客', '产品增长', '小产品变现'],
@@ -92,6 +97,11 @@ function isProfilePath(pathname = '') {
   return /^[A-Za-z0-9_]{1,15}$/.test(firstSegment) && !blocked.has(firstSegment.toLowerCase());
 }
 
+function isDiscoverySurfacePage() {
+  const pathname = window.location.pathname || '';
+  return pathname === '/home' || pathname === '/explore' || pathname === '/search';
+}
+
 function getCurrentProfilePath() {
   const firstSegment = window.location.pathname.split('/').filter(Boolean)[0] || '';
   return isProfilePath(`/${firstSegment}`) ? `/${firstSegment}` : '';
@@ -160,11 +170,12 @@ let xLoginDetectedNotified = false;
 
 function startAutoScroll() {
   if (scrollInterval || restTimeout) return;
-  chrome.storage.local.get(['isAutoPaused'], (result) => {
+  chrome.storage.local.get(['isAutoPaused', 'pendingReply', 'pendingPost', 'lastSurfaceNavigationAt'], (result) => {
     if (result.isAutoPaused) {
       addLog('info', '自动操作已暂停，不启动自动滚动');
       return;
     }
+    if (maybeNavigateToHomeSurface(result, '启动时停在个人主页或非发现页')) return;
     addLog('info', '启动自动滚动时间线');
     beginScrollCycle();
   });
@@ -551,6 +562,7 @@ function buildDiscoverySearchQueries(state = {}) {
     })
     .filter(Boolean);
   const accountQueries = collectTargetHandles(state)
+    .filter(handle => !PROJECT_ACCOUNT_HANDLES.has(handle.toLowerCase()))
     .slice(0, 6)
     .map(handle => `from:${handle} ${lang} min_faves:${minFaves} -filter:replies since:${since} ${negative}`.trim());
   return [...new Set([...topicQueries, ...accountQueries])].slice(0, 18);
@@ -611,6 +623,27 @@ function maybeNavigateToDiscoverySearch(state = {}, reason = '当前页面没有
   });
   addLog('info', `切换到关键词热帖搜索：${query}`);
   window.location.assign(url);
+  return true;
+}
+
+function maybeNavigateToHomeSurface(state = {}, reason = '当前页面不是发现流') {
+  if (isDiscoverySurfacePage()) return false;
+  if (isDiscoveryNavigationUnsafe(state)) {
+    addLog('info', '检测到未完成编辑器，暂不离开当前页面');
+    return false;
+  }
+
+  const now = Date.now();
+  const lastSurfaceNavigationAt = Number(state.lastSurfaceNavigationAt) || 0;
+  if (lastSurfaceNavigationAt && now - lastSurfaceNavigationAt < SURFACE_NAVIGATION_MIN_INTERVAL_MS) return false;
+
+  chrome.storage.local.set({
+    lastSurfaceNavigationAt: now,
+    currentDiscoveryQuery: '',
+    currentDiscoveryReason: reason
+  });
+  addLog('info', `当前不在推荐/搜索流，先进入推荐页：${reason}`);
+  window.location.assign('https://x.com/home');
   return true;
 }
 
@@ -679,6 +712,22 @@ function hasStandaloneReplyPotential(text = '') {
   ].some(pattern => pattern.test(normalized));
 }
 
+function getTweetAuthorLabel(tweetNode) {
+  return tweetNode.querySelector('div[data-testid="User-Name"]')?.innerText || '';
+}
+
+function isLikelyProjectAccount(tweetNode, author = '') {
+  const handle = String(author || '').toLowerCase();
+  if (PROJECT_ACCOUNT_HANDLES.has(handle)) return true;
+
+  const label = getTweetAuthorLabel(tweetNode).toLowerCase();
+  const companySignals = [
+    /\b(official|hq|labs|studio|team|protocol|network|foundation|inc\.?|corp\.?|company)\b/,
+    /官方|项目方|基金会|实验室|协议|网络/
+  ];
+  return companySignals.some(pattern => pattern.test(label));
+}
+
 function scoreFreshness(ageMinutes) {
   if (ageMinutes === null) return { score: 4, label: '未知发布时间' };
   if (ageMinutes <= 30) return { score: 24, label: '30分钟内' };
@@ -697,6 +746,7 @@ function getReplyOpportunity(article, author, text, state = {}) {
   const ageMinutes = getTweetAgeMinutes(article);
   const freshness = scoreFreshness(ageMinutes);
   const ownHandle = getOwnHandle();
+  const projectAccount = isLikelyProjectAccount(article, author);
 
   let score = 0;
   const reasons = [];
@@ -706,6 +756,10 @@ function getReplyOpportunity(article, author, text, state = {}) {
   }
   if (isPromotedTweet(article)) {
     return { score: -999, reasons: ['广告/推广内容'], ageMinutes, isTargetAuthor, topicRelevant };
+  }
+  if (projectAccount) {
+    score -= 70;
+    reasons.push('疑似项目方/官方号');
   }
   if (isNestedReplyTweet(article) && !isTargetAuthor) {
     score -= 12;
@@ -848,7 +902,7 @@ function scrapeTweets() {
     'isRunning', 'isAutoPaused', 'aiPersona', 'agentMemory', 'competitorReport',
     'twitterCooldownUntil', 'apiCooldownUntil', 'onboardingStrategy', 'targetUsers',
     'pendingReply', 'pendingPost', 'lastDiscoverySearchAt', 'discoverySearchIndex',
-    'currentDiscoveryQuery'
+    'currentDiscoveryQuery', 'lastSurfaceNavigationAt'
   ], (result) => {
     if (!result.isRunning) return;
     if (result.isAutoPaused) {
@@ -863,6 +917,7 @@ function scrapeTweets() {
     const persona = result.aiPersona;
     const hasPersona = persona && (persona.targetUsers || persona.characteristics || persona.goals);
     if (!hasPersona || !result.competitorReport) return;
+    if (maybeNavigateToHomeSurface(result, '当前页面不是推荐/搜索流')) return;
     
     const articles = document.querySelectorAll('article[data-testid="tweet"]');
     if (articles.length === 0) {
