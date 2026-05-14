@@ -473,13 +473,30 @@ function stableHash(text) {
   return Math.abs(hash).toString(36);
 }
 
+function getStatusIdFromHref(href = '') {
+  const match = String(href || '').match(/\/status\/(\d+)/);
+  return match?.[1] || '';
+}
+
+function getTweetStatusMeta(tweetNode) {
+  const links = Array.from(tweetNode.querySelectorAll('a[href*="/status/"]'));
+  const link = links.find(item => item.querySelector('time'))
+    || links.find(item => getStatusIdFromHref(item.getAttribute('href') || ''));
+  const href = link?.getAttribute('href') || '';
+  return {
+    href,
+    id: getStatusIdFromHref(href)
+  };
+}
+
 function getTweetStatusHref(tweetNode) {
-  return tweetNode.querySelector('a[href*="/status/"]')?.getAttribute('href') || '';
+  return getTweetStatusMeta(tweetNode).href;
 }
 
 function getTweetBotId(tweetNode, author, text) {
   if (tweetNode.dataset.botId) return tweetNode.dataset.botId;
-  const seed = getTweetStatusHref(tweetNode) || `${author}:${text.slice(0, 160)}`;
+  const status = getTweetStatusMeta(tweetNode);
+  const seed = status.id || status.href || `${author}:${text.slice(0, 160)}`;
   const id = `xbot-${stableHash(seed)}`;
   tweetNode.dataset.botId = id;
   return id;
@@ -537,7 +554,7 @@ function scrapeTweets() {
     for (const article of articles) {
       const author = getTweetAuthor(article);
       const text = getTweetText(article);
-      const tweetStatusHref = getTweetStatusHref(article);
+      const tweetStatus = getTweetStatusMeta(article);
       
       if (!text || text.length < 10) continue;
       const tweetId = getTweetBotId(article, author, text);
@@ -553,6 +570,10 @@ function scrapeTweets() {
         addLog('info', `跳过 @${author}: ${skipReason}。${text.substring(0, 50)}...`);
         continue;
       }
+      if (shouldSendReply(automationMode) && !tweetStatus.id) {
+        addLog('warn', `跳过 @${author}: 未读取到推文 status id，无法走官方 intent 回复。${text.substring(0, 50)}...`);
+        continue;
+      }
 
       addLog('info', `发现推文 @${author}: ${text.substring(0, 50)}...`);
       incrementProcessedTweets();
@@ -566,7 +587,8 @@ function scrapeTweets() {
         tweetContent: text,
         tweetAuthor: author,
         tweetElementId: tweetId,
-        tweetStatusHref
+        tweetStatusHref: tweetStatus.href,
+        tweetStatusId: tweetStatus.id
       }, (response) => {
         isReplying = false;
         chrome.storage.local.set({ isGeneratingReply: false });
@@ -603,7 +625,14 @@ function scrapeTweets() {
           if (willSend) {
             // Dispatch event for automator
             window.dispatchEvent(new CustomEvent('xAutoBot_ReadyToReply', {
-              detail: { tweetElementId: tweetId, replyText, tweetAuthor: author, tweetContent: text, tweetStatusHref }
+              detail: {
+                tweetElementId: tweetId,
+                replyText,
+                tweetAuthor: author,
+                tweetContent: text,
+                tweetStatusHref: tweetStatus.href,
+                tweetStatusId: tweetStatus.id
+              }
             }));
           }
         }

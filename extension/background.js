@@ -427,6 +427,64 @@ function addLog(level, message) {
   });
 }
 
+function debuggerCall(fn) {
+  return new Promise((resolve, reject) => {
+    fn((result) => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        reject(new Error(error.message));
+      } else {
+        resolve(result);
+      }
+    });
+  });
+}
+
+async function performTrustedClick(tabId, x, y) {
+  if (!tabId) throw new Error('缺少目标标签页');
+  if (!chrome.debugger) throw new Error('缺少 debugger 权限');
+
+  const target = { tabId };
+  const clickX = Math.round(Number(x));
+  const clickY = Math.round(Number(y));
+  if (!Number.isFinite(clickX) || !Number.isFinite(clickY)) {
+    throw new Error('点击坐标无效');
+  }
+
+  await debuggerCall(callback => chrome.debugger.attach(target, '1.3', callback));
+  try {
+    await debuggerCall(callback => chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: clickX,
+      y: clickY,
+      button: 'none'
+    }, callback));
+    await debuggerCall(callback => chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: clickX,
+      y: clickY,
+      button: 'left',
+      buttons: 1,
+      clickCount: 1
+    }, callback));
+    await new Promise(resolve => setTimeout(resolve, 80));
+    await debuggerCall(callback => chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: clickX,
+      y: clickY,
+      button: 'left',
+      buttons: 0,
+      clickCount: 1
+    }, callback));
+  } finally {
+    try {
+      await debuggerCall(callback => chrome.debugger.detach(target, callback));
+    } catch (error) {
+      addLog('warn', `释放调试点击通道失败: ${error.message}`);
+    }
+  }
+}
+
 chrome.runtime.onInstalled.addListener((details) => {
   console.log("X Auto Bot extension installed.");
   addLog('info', '扩展程序已安装/更新');
@@ -474,6 +532,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
       });
     return true; // 保持通道异步开启
+  } else if (request.action === "trustedClick") {
+    performTrustedClick(sender.tab?.id, request.x, request.y)
+      .then(() => sendResponse({ success: true }))
+      .catch((error) => {
+        addLog('warn', `真实点击失败，回退 DOM 点击: ${error.message}`);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
   } else if (request.action === "queueUpdated") {
     checkAndSetupAlarm();
   } else if (request.action === "refreshXOfficialDraftCount") {
