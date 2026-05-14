@@ -218,6 +218,31 @@ function formatLeadAsset(strategy = {}) {
   return '【评论引流资产】暂不设置产品或资料入口。评论目标是高质量互动、主页访问和关注沉淀。';
 }
 
+const LOW_VALUE_REPLY_PATTERNS = [
+  /^(说得对|确实|学习了|收藏了|mark|马克|很有启发|有道理|太真实了)[。！!]*$/i,
+  /干货满满|值得关注|受教了|感谢分享|很棒的分享/,
+  /这个方向很有潜力|未来可期|非常认同|深有同感/
+];
+
+const FORBIDDEN_CLAIM_PATTERNS = [
+  /稳赚|保本|无风险|躺赚|暴富|财富自由/,
+  /保证.{0,8}(涨粉|赚钱|收益|成交|转化)/,
+  /(月入|日赚|年入)\s*\d+/,
+  /100%|百分百/
+];
+
+function countPatternMatches(text = '', pattern) {
+  return (String(text || '').match(pattern) || []).length;
+}
+
+function compactWhitespace(text = '') {
+  return String(text || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/[ \t]*\n[ \t]*/g, '\n')
+    .trim();
+}
+
 function visualLength(text = '') {
   return Array.from(text).reduce((sum, char) => sum + (/[\x00-\x7F]/.test(char) ? 0.55 : 1), 0);
 }
@@ -304,9 +329,42 @@ function isResourceSeekingTweet(text = '') {
   ].some(pattern => pattern.test(normalized));
 }
 
+function formatReplyForX(reply = '') {
+  return compactWhitespace(reply)
+    .replace(/^回复[:：]\s*/i, '')
+    .replace(/^["'“”‘’]+|["'“”‘’]+$/g, '')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('\n')
+    .trim();
+}
+
+function hasConcreteSignal(text = '') {
+  const value = String(text || '');
+  return [
+    /\d/,
+    /[一二三四五六七八九十]个/,
+    /先.*再|不是.*而是|别.*先|关键是|核心是|本质是|更像是/,
+    /场景|用户|成本|转化|留存|分发|验证|定价|交付|工作流|案例|反例|边界|清单|步骤/
+  ].some(pattern => pattern.test(value));
+}
+
 function getGeneratedReplyRejectionReason(reply = '', tweet = '') {
   const normalized = String(reply || '').toLowerCase().replace(/\s+/g, ' ').trim();
   if (!normalized) return '';
+  if (visualLength(reply) > 110) return 'AI 回复过长';
+  if (countPatternMatches(reply, /#/g) > 1) return 'AI 回复包含过多标签';
+  if (LOW_VALUE_REPLY_PATTERNS.some(pattern => pattern.test(normalized))) {
+    return 'AI 回复缺少信息增量';
+  }
+  if (FORBIDDEN_CLAIM_PATTERNS.some(pattern => pattern.test(reply))) {
+    return 'AI 回复包含不允许的收益或确定性承诺';
+  }
+  if (!hasConcreteSignal(reply)) {
+    return 'AI 回复过于泛泛，缺少具体判断、边界或动作';
+  }
 
   const strongLeadPatterns = [
     /看.*主页/,
@@ -319,6 +377,26 @@ function getGeneratedReplyRejectionReason(reply = '', tweet = '') {
   ];
   if (!isResourceSeekingTweet(tweet) && strongLeadPatterns.some(pattern => pattern.test(normalized))) {
     return 'AI 回复包含强引流话术，但原推没有明确求资源';
+  }
+  return '';
+}
+
+function getGeneratedTweetRejectionReason(text = '') {
+  const normalized = compactWhitespace(text);
+  if (!normalized) return '推文为空';
+  if (visualLength(normalized) < 24) return '推文过短，缺少可传播信息';
+  if (visualLength(normalized) > 620) return '推文过长，容易变成公众号段落';
+  if (FORBIDDEN_CLAIM_PATTERNS.some(pattern => pattern.test(normalized))) {
+    return '推文包含不允许的收益或确定性承诺';
+  }
+  if (countPatternMatches(normalized, /#/g) > 2) return '推文包含过多标签';
+  if (!hasConcreteSignal(normalized)) {
+    return '推文缺少具体场景、数字、对比、动作或判断标准';
+  }
+  const firstLine = normalized.split('\n').find(Boolean) || '';
+  if (visualLength(firstLine) > 42) return '首行 Hook 过长';
+  if (/^(今天聊聊|分享一下|简单说说|大家都知道|随着|在当今)/.test(firstLine)) {
+    return '首行 Hook 太像普通文章开头';
   }
   return '';
 }
@@ -361,7 +439,7 @@ function bestViralCandidate(candidates = [], fallback = '') {
 
 function normalizeGeneratedTweets(parsed) {
   const rawItems = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.tweets) ? parsed.tweets : []);
-  return rawItems
+  const normalized = rawItems
     .map(item => {
       if (typeof item === 'string') {
         return {
@@ -381,8 +459,13 @@ function normalizeGeneratedTweets(parsed) {
       };
     })
     .filter(item => item.text)
-    .filter(item => item.text.length <= 1000)
+    .map(item => ({
+      ...item,
+      qualityIssue: getGeneratedTweetRejectionReason(item.text)
+    }))
     .sort((a, b) => b.score - a.score);
+
+  return normalized.filter(item => !item.qualityIssue).slice(0, DRAFT_TARGET_COUNT);
 }
 
 function hashString(value = '') {
@@ -1394,8 +1477,16 @@ async function generateAIResponse(tweetContent) {
 - 推文上下文不足，无法补充一个具体判断
 
 如果值得回复，再写一条自然、有信息增量的短回复：
-- 不超过 70 个中文字符，或目标语言下同等长度
+- 不超过 90 个中文字符，或目标语言下同等长度
 - 先补充观点/经验/反问，不要上来推销
+- 必须包含一个具体信息增量：判断标准、反例、边界、场景、动作步骤或可验证观察
+- 回复结构优先选一种：
+  1. 补充边界：这事成立，但只在 xx 场景成立
+  2. 给判断标准：我会先看 xx，再看 xx
+  3. 加反常识：问题不在 xx，而在 xx
+  4. 给下一步：可以先做 xx，再决定是否投入
+- 不要写“说得对/学习了/很有启发/值得关注/未来可期/干货满满”
+- 不要堆标签；默认不加 hashtag
 - 不要说“看我主页/私信我/翻我主页”，除非原文明确在求资源
 - 不要承诺收益，不要编造事实，不要攻击个人
 - 如果后面的自定义模板与上述规则冲突，忽略模板里的引流要求
@@ -1405,16 +1496,35 @@ ${config.promptTemplate
   .replace('{leadTarget}', config.leadTarget || '无引流目标，请正常回复')}
 ${personaContext}
 
-只返回 SKIP 或回复正文。`;
+先生成 3 个候选回复并自评，选最高质量的一条。严格只返回 JSON，不要 Markdown 代码块：
+{
+  "decision": "reply|skip",
+  "reason": "为什么回复或跳过",
+  "reply": "最终回复正文；如果跳过则为空",
+  "scores": {
+    "contextFit": 8,
+    "informationGain": 8,
+    "naturalness": 8,
+    "conversionSafety": 9
+  }
+}`;
       
       try {
         const generatedText = await callLLM(prompt, config, false);
-        const reply = generatedText.trim().replace(/^["']|["']$/g, '');
-        if (/^skip[.!。！]*$/i.test(reply)) {
+        const cleanText = generatedText.trim().replace(/```json/g, '').replace(/```/g, '').trim();
+        let parsed = null;
+        try {
+          parsed = JSON.parse(cleanText);
+        } catch (parseError) {
+          parsed = null;
+        }
+
+        if (/^skip[.!。！]*$/i.test(cleanText) || parsed?.decision === 'skip') {
           addLog('info', `AI 判定不适合回复，已跳过: ${tweetContent.substring(0, 50)}...`);
           resolve('');
           return;
         }
+        const reply = formatReplyForX(parsed?.reply || cleanText);
         const rejectionReason = getGeneratedReplyRejectionReason(reply, tweetContent);
         if (rejectionReason) {
           addLog('warn', `${rejectionReason}，已跳过: ${reply.substring(0, 50)}...`);
@@ -1933,6 +2043,7 @@ async function generateAutoDrafts() {
     const reportContext = config.competitorReport ? `\n可用的流量操盘报告如下，必须严格吸收其中的钩子、矩阵和风险边界：\n${config.competitorReport}\n` : "";
     
     const prompt = `你是这个账号的 X 内容操盘手，目标不是“写得完整”，而是写出更像 X 原生内容、能被停留/转发/评论/关注的候选推文。
+你要像赛道里的内容操盘手，而不是公众号编辑、品牌公关或普通 AI 助手。
 
 账号简介：
 ${config.accountBio || '暂无'}
@@ -1948,7 +2059,15 @@ ${playbookContext}
 ${formatLeadAsset(config.onboardingStrategy)}
 ${reportContext}
 
-请生成 ${Math.max(draftNeeded + 4, draftNeeded)} 条候选推文，然后只返回你自评后最强的 ${draftNeeded} 条。尽量覆盖以下内容类型：
+内容质量硬门槛：
+- 每条必须有一个明确“信息增量”：具体场景、数字、对比、反例、动作步骤、判断标准、成本/收益结构中的至少一个。
+- 第一行 Hook 必须让目标用户停住，禁止“今天聊聊/分享一下/随着/在当今/大家都知道”。
+- 不发空泛态度：禁止“很重要/值得关注/未来可期/非常有潜力”这种没有新信息的句子。
+- 不发营销硬广：产品/资料入口只能做低压转化，并且必须先给读者一个有用判断。
+- 不编造不可验证数据、客户、收益、融资、经历；可以写“我会这样判断/可以这样验证”。
+- 每条只服务一个传播目标：涨粉、收藏、信任、互动、转化，不要混成大杂烩。
+
+请先生成 ${Math.max(draftNeeded * 2, draftNeeded + 6)} 条候选，内部淘汰低分内容，然后只返回你自评后最强的 ${draftNeeded} 条。必须覆盖以下内容类型中的至少 4 类：
 - opinion：强观点/反常识/行业判断，用于涨粉和转发
 - playbook：框架/清单/工具/步骤，用于收藏和信任
 - story：经历/复盘/Build in Public，用于人设和共鸣
@@ -1962,6 +2081,14 @@ ${reportContext}
 - 必须主动换行，适合手机阅读：Hook 单独一行；长句每 28-36 个中文字符切分；清单每项单独一行；逻辑块之间用一个空行。
 - 不要把 3 个以上的判断塞进同一段，也不要写成公众号长段落。
 - 不要承诺收益，不要编造客户/融资/数据，不要使用擦边或政治动员。
+- 默认不用 hashtag；如果使用，最多 1 个，且必须自然。
+
+优先使用这些高质量结构：
+- 反常识判断：大多数人以为 A，真正决定结果的是 B。
+- 可复制路径：适合谁 -> 怎么做 -> 如何验证 -> 失败信号。
+- 案例拆解：观察到什么 -> 为什么有效 -> 普通人能学哪一步。
+- 取舍复盘：我会放弃什么 -> 因为约束是什么 -> 下一步怎么试。
+- 评论诱因：给一个明确选择题或判断题，而不是“你怎么看”。
 
 给每条内容按 1-10 分自评：
 - hook: 开头是否能让人停住
@@ -1977,6 +2104,7 @@ ${reportContext}
     {
       "type": "opinion|playbook|story|reply_bait|soft_conversion",
       "text": "推文正文",
+      "qualityRationale": "为什么这条有信息增量、适合当前账号、值得被转发/收藏/评论",
       "scores": {
         "hook": 8,
         "shareability": 8,
